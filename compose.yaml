@@ -1,0 +1,93 @@
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: ${PROJECT_NAME}_postgres
+    environment:
+      PGHOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pg-data:/var/lib/postgresql/data/pgdata
+    networks:
+      - internal
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: ${PROJECT_NAME}_pgadmin
+    ports:
+      - "${PGADMIN_HOST_PORT}:${PGADMIN_CONTAINER_PORT}"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - internal
+    profiles: ["tools"]
+    restart: unless-stopped
+
+  odoo:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: ${PROJECT_NAME}_odoo
+    depends_on:
+      - postgres
+    volumes:
+      - odoo-filestore:/var/lib/odoo
+      - ./src:/home/odoo/src
+      - odoo-data:/home/odoo/data
+      - python-usr-local:/usr/local/lib/
+      - python-usr:/usr/lib/
+    command: odoo --dev=all
+    environment:
+      PGHOST: postgres
+      # Odoo config block
+      CUSTOM_CONFIG: |
+        [options]
+      CUSTOM_REQUIREMENTS: |
+        # Custom pip requirements
+      CUSTOM_ENTRYPOINT: |
+        #!/bin/bash
+      SMTP_SERVER: mailhog
+      SMTP_PORT: 1025
+      DBFILTER: ${ODOO_DBFILTER}
+      SERVER_WIDE_MODULES: ${ODOO_SERVER_WIDE_MODULES}
+      MAX_CRON_THREADS: ${ODOO_MAX_CRON_THREADS}
+      WORKERS: ${ODOO_WORKERS}
+      CUSTOM_ENABLED: ${CUSTOM_ENABLED}
+      LIST_DB: ${ODOO_LIST_DB}
+      WITHOUT_DEMO: ${ODOO_WITHOUT_DEMO}
+      ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD}
+      PROXY_MODE: ${ODOO_PROXY_MODE}
+      SERVER_MODE: ${ODOO_SERVER_MODE}
+      AEROO_DOCS_HOST: ${AEROO_DOCS_HOST}
+      LIMIT_TIME_REAL_CRON: ${ODOO_LIMIT_TIME_REAL_CRON}
+      LIMIT_TIME_REAL: ${ODOO_LIMIT_TIME_REAL}
+      UNACCENT: ${ODOO_UNACCENT}
+      LOG_LEVEL: info
+      PYTHONPATH: /opt/odoo:/home/odoo/src
+    ports:
+      - "${ODOO_HOST_PORT}:${ODOO_CONTAINER_PORT}"
+      - "${ODOO_HOST_PORT_XMLRPC}:${ODOO_CONTAINER_PORT_XMLRPC}"
+    networks:
+      - internal
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  odoo-filestore:
+  odoo-data:
+  python-usr-local:
+  python-usr:
+  pgadmin-data:
+
+networks:
+  internal:
+    driver: bridge

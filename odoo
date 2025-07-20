@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+
+import webbrowser
+import socket
+import os
+import subprocess
+from pathlib import Path
+import click
+from dotenv import load_dotenv
+import shutil
+import datetime
+import zipfile
+
+
+def container_path_exists(container, path):
+    """
+    Check if a directory exists at the specified path within a Docker container.
+    """
+    result = subprocess.run(
+        ["docker", "exec", container, "test", "-d", path],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    return result.returncode == 0
+
+
+def find_project_root(marker_file="compose.yaml"):
+    """
+    Locate the root directory of the project by searching for a specific marker file.
+
+    This function traverses the directory tree upwards from the current working directory
+    until it finds a directory containing the specified marker file. If found, it loads
+    environment variables from a .env file in the same directory.
+    """
+    current_dir = Path.cwd()
+    home_dir = Path.home()
+
+    while current_dir != home_dir.parent:
+        if (current_dir / marker_file).exists():
+            env_path = current_dir / ".env"
+            if env_path.exists():
+                load_dotenv(dotenv_path=env_path)
+            return current_dir
+        if current_dir == home_dir:
+            break
+        current_dir = current_dir.parent
+
+    return None
+
+
+def get_project_name(default="odoo"):
+    return os.getenv("PROJECT_NAME", default)
+
+
+@click.group(context_settings=dict(help_option_names=['-h', '--help']))
+def cli():
+    """Unified Odoo CLI tool"""
+    pass
+
+
+@cli.command("install-cli")
+@click.option('--local', is_flag=True, help="Install in .bin directory for project-local usage")
+def install_cli(local):
+    """Install the odoo CLI as a symlink in a local .bin directory (default)"""
+    from pathlib import Path
+
+    script_name = "odoo"
+    target_dir = Path(".bin") if local else Path.home() / ".local" / "bin"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    source = Path(__file__).resolve()
+    destination = target_dir / script_name
+
+    if destination.exists() or destination.is_symlink():
+        destination.unlink()
+    destination.symlink_to(source)
+
+    click.echo(f"✔ Symlink created at: {destination} -> {source}")
+    if local:
+        click.echo("\n👉 Add this to your shell config (or use a wrapper):")
+        click.echo(f'  export PATH="{target_dir.resolve()}:$PATH"')
+        click.echo("Or run this manually in your terminal:")
+        click.echo(f'  export PATH="{target_dir.resolve()}:$PATH"')
+    else:
+        click.echo("✅ 'odoo' command is now globally available.")
+
+
+@cli.command("build")
+@click.option('--no-cache', is_flag=True, help="Build Docker images without cache.")
+def build(no_cache):
+    """
+    Build/rebuild Docker images for the project, selecting the correct Dockerfile by ODOO_VERSION in .env.
+    """
+    find_project_root()
+    odoo_version = os.getenv("ODOO_VERSION")
+    if not odoo_version:
+        raise click.UsageError("ODOO_VERSION not set in .env")
+
+    src_dockerfile = Path("Dockerfiles") / str(odoo_version) / "Dockerfile"
+    dest_dockerfile = Path("Dockerfile")
+
+    if not src_dockerfile.exists():
+        raise click.ClickException(
+            f"Dockerfile for Odoo version {
+                odoo_version} not found at {src_dockerfile}"
+        )
+
+    shutil.copy2(src_dockerfile, dest_dockerfile)
+    click.echo(f"📝 Copied {src_dockerfile} → {dest_dockerfile}")
+
+    # Build the image
+    click.echo("🔨 Building Docker images...")
+    result = subprocess.run(["docker", "compose", "build"])
+    if result.returncode == 0:
+        click.echo("✅ Build completed successfully")
+    else:
+        raise click.ClickException("Build failed. Check the logs.")
+
+
+@cli.command("manage-user")
+@click.option("-d", "--database", required=True, help="Database name")
+@click.option("-u", "--user", default=None, help="User to update")
+@click.option("--list-admins", is_flag=True, help="List admin users")
+@click.option("-p", "--password", help="Custom password to set (default from .env)")
+def manage_users(database, user, list_admins, password):
+    try:
+        project_dir = find_project_root()
+        if not project_dir:
+            raise click.UsageError(
+                "Docker project not found. Execute from project directory.")
+
+        project = get_project_name()
+        container_postgre = f"{project}_postgres"
+        container_odoo = f"{project}_odoo"
+
+        db_user = os.getenv("POSTGRES_USER", "odoo")
+        db_password = os.getenv("POSTGRES_PASSWORD", "odoo")
+        new_password = password or os.getenv("RESET_PASSWORD", "admin")
+
+        if list_admins:
+            query = """
+                SELECT ru.login, rp.name 
+                FROM res_users ru 
+                JOIN res_groups_users_rel gurel ON ru.id = gurel.uid 
+                JOIN res_groups rg ON gurel.gid = rg.id 
+                JOIN ir_model_data imd ON imd.res_id = rg.id AND imd.model = 'res.groups' 
+                JOIN res_partner rp ON ru.partner_id = rp.id 
+                WHERE imd.module = 'base' AND imd.name = 'group_system';
+            """
+            cmd = [
+                "docker", "exec", "-e", f"PGPASSWORD={db_password}",
+                container_postgre, "psql",
+                "--host", "localhost",
+                "-U", db_user,
+                "-d", database,
+                "-c", query,
+            ]
+            click.echo("👔 Admin users:")
+            subprocess.run(cmd, check=True)
+            return
+
+        if not user:
+            raise click.UsageError(
+                "must specify user with -u or use --list-admins")
+
+        query = f"""
+            UPDATE res_users
+            SET password = '{new_password}'
+            WHERE login = '{user}';
+        """
+        cmd = [
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}",
+            container_postgre, "psql",
+            "--host", "localhost",
+            "-U", db_user,
+            "-d", database,
+            "-c", query,
+        ]
+        subprocess.run(cmd, check=True)
+        click.echo(f"✅ Password for {user} reset successfully")
+
+    except subprocess.CalledProcessError as e:
+        click.echo(f"❌ Database error: {
+                   e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@cli.command("update-modules")
+@click.option("-d", "--database", required=True, help="Database name")
+@click.option("-m", "--modules", required=True, help="Module(s) to update (comma-separated or 'all')")
+@click.option("--show-logs", is_flag=True, help="Show full Odoo logs")
+@click.option("--stop-after-init", is_flag=True, help="Stop server after update")
+def update_modules(database, modules, show_logs, stop_after_init):
+    """Update Odoo modules using Docker"""
+    try:
+        project_dir = find_project_root()
+        if not project_dir:
+            raise click.UsageError(
+                "Docker project not found. Execute from project directory.")
+
+        project = get_project_name()
+        container_odoo = f"{project}_odoo"
+        container_postgre = f"{project}_postgres"
+
+        update_cmd = [
+            "docker", "exec", "-u", "odoo", container_odoo,
+            "odoo", "-d", database, "-u", modules
+        ]
+
+        if stop_after_init:
+            update_cmd.append("--stop-after-init")
+
+        click.echo(f"🔄 Updating modules: {modules}...")
+        result = subprocess.run(
+            update_cmd,
+            capture_output=not show_logs,
+            text=True
+        )
+
+        if result.returncode == 0:
+            click.echo(f"✅ Modules updated successfully in {database}")
+        else:
+            error_msg = result.stderr if result.stderr else "Check logs with --show-logs"
+            raise click.ClickException(f"Module update failed: {error_msg}")
+
+    except subprocess.CalledProcessError as e:
+        click.echo(f"❌ Docker error: {e.stderr if e.stderr else str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@cli.command("create-backup")
+@click.option("-d", "--database", required=True, help="Database name")
+def create_backup(database):
+    """Create a backup of the database and filestore"""
+    try:
+        project_dir = find_project_root()
+        if not project_dir:
+            raise click.UsageError("Project not found. Run from project root.")
+
+        project = get_project_name()
+        container_postgre = f"{project}_postgres"
+        container_odoo = f"{project}_odoo"
+
+        db_user = os.getenv("POSTGRES_USER", "odoo")
+        db_password = os.getenv("POSTGRES_PASSWORD", "odoo")
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_name = f"{database}_{timestamp}"
+        working_dir = Path("/tmp") / backup_name
+        backups_dir = project_dir / "backups"
+        filestore_path = f"/var/lib/odoo/filestore/{database}"
+
+        os.makedirs(working_dir, exist_ok=True)
+        os.makedirs(backups_dir, exist_ok=True)
+
+        # 1. Dump in binary format
+        click.echo("📦 Dumping database (binary)...")
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}", container_postgre,
+            "pg_dump", "-Fc", "-h", "localhost", "-U", db_user,
+            "-d", database, "-f", f"/tmp/{database}.dump"
+        ], check=True)
+        subprocess.run([
+            "docker", "cp", f"{
+                container_postgre}:/tmp/{database}.dump", str(working_dir / "dump.dump")
+        ], check=True)
+        # Clean up
+        subprocess.run([
+            "docker", "exec", container_postgre, "rm", f"/tmp/{database}.dump"
+        ], check=True)
+
+        # 2. Dump in plain SQL
+        click.echo("📄 Dumping database (plain SQL)...")
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}", container_postgre,
+            "pg_dump", "-Fp", "-h", "localhost", "-U", db_user,
+            "-d", database, "-f", f"/tmp/{database}.sql"
+        ], check=True)
+        subprocess.run([
+            "docker", "cp", f"{
+                container_postgre}:/tmp/{database}.sql", str(working_dir / "dump.sql")
+        ], check=True)
+        subprocess.run([
+            "docker", "exec", container_postgre, "rm", f"/tmp/{database}.sql"
+        ], check=True)
+
+        # 3. Filestore copy
+        click.echo("🗃️ Copying filestore...")
+        # Verifica existencia del path en el contenedor Odoo
+        if not container_path_exists(container_odoo, filestore_path):
+            click.echo(f"⚠️  Filestore path {
+                       filestore_path} not found in container. Continuing backup without filestore (DB may be new or unused).")
+        else:
+            subprocess.run([
+                "docker", "cp", f"{container_odoo}:{
+                    filestore_path}", str(working_dir / "filestore")
+            ], check=True)
+
+        # 4. Tar.gz compression
+        archive_path = backups_dir / f"{backup_name}.gz"
+        click.echo(f"🗜️ Compressing to {archive_path}...")
+        shutil.make_archive(str(archive_path.with_suffix("")),
+                            "gztar", root_dir=working_dir)
+
+        shutil.rmtree(working_dir)
+        click.echo("✅ Backup completed successfully")
+
+    except subprocess.CalledProcessError as e:
+        click.echo(f"❌ Backup error: {
+                   e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@cli.command("restore-backup")
+@click.option("-d", "--database", required=True, help="Original backup name prefix")
+@click.option("--to", "target_db", required=True, help="New database name to restore to")
+def restore_backup(database, target_db):
+    """
+    Restore a database and filestore from a backup (.tar.gz or .zip, Odoo web or custom CLI).
+    Compatible with backups created both from Odoo web (.zip) and custom CLI (.tar.gz).
+    """
+    try:
+        project_dir = find_project_root()
+        if not project_dir:
+            raise click.UsageError("Project not found. Run from project root.")
+
+        project = get_project_name()
+        container_postgre = f"{project}_postgres"
+        container_odoo = f"{project}_odoo"
+
+        db_user = os.getenv("POSTGRES_USER", "odoo")
+        db_password = os.getenv("POSTGRES_PASSWORD", "odoo")
+
+        backups_dir = project_dir / "backups"
+
+        # Gather all matching files: by exact name and by prefix with underscore
+        pattern_files = list(backups_dir.glob(f"{database}*.tar.gz")) + \
+                        list(backups_dir.glob(f"{database}*.tar.tar.gz")) + \
+                        list(backups_dir.glob(f"{database}*.zip"))
+
+        exact_files = [backups_dir / database] if (backups_dir / database).exists() else []
+
+        # Combine and deduplicate
+        all_files = {file.resolve(): file for file in pattern_files + exact_files}.values()
+
+        # Sort by modification time, newest first
+        backup_files = sorted(all_files, key=lambda f: f.stat().st_mtime, reverse=True)
+
+        if not backup_files:
+            raise click.ClickException(f"No backup found for '{database}'.")
+
+        backup_path = backup_files[0]
+
+        working_dir = Path(
+            "/tmp") / f"restore_{target_db}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        os.makedirs(working_dir, exist_ok=True)
+
+        # Extraction
+        if backup_path.suffix == ".zip":
+            click.echo(f"📦 Extracting ZIP {backup_path.name}...")
+            with zipfile.ZipFile(backup_path, "r") as zip_ref:
+                zip_ref.extractall(working_dir)
+        else:
+            click.echo(f"📦 Extracting TAR {backup_path.name}...")
+            subprocess.run(["tar", "-xzf", str(backup_path),
+                           "-C", str(working_dir)], check=True)
+
+        click.echo("🗑️ Dropping existing database (if any)...")
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}", container_postgre,
+            "dropdb", "--if-exists", "-h", "localhost", "-U", db_user, target_db
+        ], check=True)
+
+        click.echo("🧱 Creating new database...")
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}", container_postgre,
+            "createdb", "-h", "localhost", "-U", db_user, target_db
+        ], check=True)
+
+        click.echo("📄 Restoring from SQL dump...")
+        sql_dump = working_dir / "dump.sql"
+        if not sql_dump.exists():
+            raise click.ClickException(
+                "SQL dump file 'dump.sql' not found in backup.")
+        subprocess.run([
+            "docker", "cp", str(sql_dump), f"{container_postgre}:/tmp/dump.sql"
+        ], check=True)
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}", container_postgre,
+            "psql", "-h", "localhost", "-U", db_user, "-d", target_db, "-f", "/tmp/dump.sql"
+        ], check=True)
+
+        # Restore filestore if present
+        filestore_src = working_dir / "filestore"
+        if filestore_src.exists():
+            click.echo("🗃️ Restoring filestore...")
+            # Ensure destination directory exists in the container
+            subprocess.run([
+                "docker", "exec", container_odoo, "mkdir", "-p", f"/var/lib/odoo/filestore/{
+                    target_db}"
+            ], check=True)
+            # Copy the content of filestore, not the folder itself
+            subprocess.run([
+                "docker", "cp",
+                str(filestore_src) + "/.",
+                f"{container_odoo}:/var/lib/odoo/filestore/{target_db}"
+            ], check=True)
+        else:
+            click.echo(
+                "⚠️  No filestore found in backup. Skipping filestore restore.")
+
+        shutil.rmtree(working_dir)
+        click.echo("✅ Restore completed successfully")
+
+    except subprocess.CalledProcessError as e:
+        click.echo(f"❌ Restore error: {
+                   e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@cli.command("sh")
+@click.argument("service", required=False, default="odoo")
+@click.option("-s", "--shell", default="bash", help="Shell to use (bash, sh, zsh, etc.)")
+def sh(service, shell):
+    """
+    Open a shell in a project container. Default: odoo
+    Usage: odoo sh [service] [--shell bash]
+    """
+    # Ensure .env is loaded by finding project root
+    find_project_root()
+    project = get_project_name()
+    container = f"{project}_{service}"
+
+    # Get all running containers' names
+    result = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        capture_output=True, text=True
+    )
+    containers = result.stdout.splitlines()
+    if container not in containers:
+        click.echo(f"❌ Container '{container}' not found.")
+        click.echo("Available containers for this project:")
+        for name in containers:
+            if name.startswith(f"{project}_"):
+                click.echo(f"  - {name.replace(project + '_', '')}")
+        click.echo(f"\n👉 Try: odoo sh [service]\nFor example: odoo sh odoo")
+        return
+
+    click.echo(f"🔗 Connecting to shell in '{container}'...")
+    try:
+        subprocess.run(["docker", "exec", "-it", container, shell])
+    except Exception as e:
+        click.echo(f"❌ Error: {e}")
+
+
+@cli.command("ps")
+def ps():
+    """
+    List all running containers for this project.
+    """
+    project = get_project_name()
+    click.echo(f"📦 Containers matching '{project}':")
+    subprocess.run(["docker", "ps", "--filter", f"name={project}"])
+
+
+@cli.command("db-list")
+def db_list():
+    """
+    List all databases in the Postgres container.
+    """
+    find_project_root()
+    project = get_project_name()
+    container_postgre = f"{project}_postgres"
+    db_user = os.getenv("POSTGRES_USER", "odoo")
+    db_password = os.getenv("POSTGRES_PASSWORD", "odoo")
+    query = "SELECT datname FROM pg_database WHERE datistemplate = false;"
+    try:
+        subprocess.run([
+            "docker", "exec", "-e", f"PGPASSWORD={db_password}",
+            container_postgre, "psql", "-U", db_user, "-d", "postgres", "-c", query
+        ], check=True)
+    except Exception as e:
+        click.echo(f"❌ Error: {e}")
+
+
+@cli.command("status")
+def status():
+    """
+    Check if Odoo stack services are running and responding on their expected
+    ports.
+    """
+    find_project_root()
+
+    services = [
+        {
+            "name": "Odoo",
+            "env_port": "ODOO_HOST_PORT",
+            "default_port": 8069,
+        },
+        {
+            "name": "PgAdmin",
+            "env_port": "PGADMIN_HOST_PORT",
+            "default_port": 8008,
+        },
+    ]
+
+    host = "127.0.0.1"
+
+    click.echo("🔎 Checking Odoo stack services:")
+
+    for svc in services:
+        port = int(os.getenv(svc["env_port"], svc["default_port"]))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        try:
+            sock.connect((host, port))
+            click.echo(f"  ✅ {svc['name']} is accepting connections on {
+                       host}:{port}")
+        except Exception:
+            click.echo(f"  ❌ {svc['name']} is NOT responding on {host}:{port}")
+        finally:
+            sock.close()
+
+
+@cli.command("pgadmin")
+def pgadmin():
+    """
+    Open PgAdmin in your browser.
+    """
+    find_project_root()
+    port = os.getenv("PGADMIN_HOST_PORT", "8008")
+    url = f"http://localhost:{port}"
+    click.echo(f"🌐 Opening PgAdmin at {url}")
+    webbrowser.open(url)
+
+
+if __name__ == "__main__":
+    cli()

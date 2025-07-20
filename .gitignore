@@ -1,0 +1,6 @@
+backup/
+backups/
+.env
+src/*
+/Dockerfile
+.DS_Store
