@@ -1,6 +1,6 @@
-backup/
 backups/
 .env
 src/*
 /Dockerfile
 .DS_Store
+__pycache__/
