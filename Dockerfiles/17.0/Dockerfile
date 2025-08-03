@@ -57,19 +57,6 @@ RUN curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | gpg --dearmor
 # Install global npm packages for Odoo frontend development
 RUN npm install --force -g rtlcss@3.4.0 es-check@6.0.0 eslint@8.1.0 prettier@2.7.1 eslint-config-prettier@8.5.0 eslint-plugin-prettier@4.2.1
 
-# Install extra system requirements from Odoo's debian/control file
-# ADD https://raw.githubusercontent.com/odoo/odoo/17.0/debian/control /tmp/control.txt
-# RUN curl -sSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/trusted.gpg.d/psql_client.asc && \
-#     echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -s -c)-pgdg main" > /etc/apt/sources.list.d/pgclient.list && \
-#     apt-get update && \
-#     sed -n '/^Depends:/,/^[A-Z]/p' /tmp/control.txt | \
-#     awk '/^ [a-z]/ { gsub(/,/,""); gsub(" ", ""); print $NF }' | sort -u | \
-#     DEBIAN_FRONTEND=noninteractive xargs apt-get install -y -qq --no-install-recommends && \
-#     apt-get clean && \
-#     rm -rf /var/lib/apt/lists/*
-
-# Install Odoo 17.0 from official nightly build
-
 # Define Odoo version as a build argument
 ARG ODOO_VERSION=17.0
 ENV ODOO_VERSION=${ODOO_VERSION}
@@ -111,25 +98,6 @@ RUN python3 -m pip install --no-cache-dir \
 ADD --chown=odoo https://raw.githubusercontent.com/odoo/odoo/17.0/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Install core Python dependencies (single RUN for layer optimization)
-# RUN python3 -m pip install --no-cache-dir \
-#     watchdog \
-#     xmltodict \
-#     pandas \
-#     bravado_core \
-#     swagger_spec_validator \
-#     jsonschema==3.2.0 \
-#     pdf2image \
-#     git+https://github.com/binaural-dev/python-sdk.git \
-#     cryptography==35.0.0 \
-#     fsspec \
-#     Unidecode \
-#     pymupdf \
-#     schwifty \
-#     sortedcontainers \
-#     microsoftgraph-python \
-#     requests
-
 # Environment variables for standard directories
 ENV SOURCES=/home/odoo/src \
     CONFIG_DIR=/home/odoo/.config \
@@ -148,9 +116,6 @@ ENV ODOO_SERVER=odoo \
     PGPORT=5432 \
     ADMIN_PASSWORD=admin
 
-# Useful aliases for odoo-shell
-# RUN echo "alias odoo-shell='odoo shell --shell-interface ipython --no-http --limit-memory-hard=0 --limit-memory-soft=0'" >> /home/odoo/.bashrc
-
 # Install pip dependencies
 COPY odooo/requirements.txt /home/odoo/odooo/requirements.txt
 RUN pip3 install --no-cache-dir -r /home/odoo/odooo/requirements.txt
@@ -165,7 +130,6 @@ RUN chmod +x /home/odoo/odooo/entrypoint.sh
 
 # Expose Odoo service ports
 EXPOSE 8069 8071 8072
-
 
 # Entrypoint and default command
 WORKDIR "/home/odoo"
