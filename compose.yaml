@@ -45,6 +45,7 @@ services:
       - odoo-data:/home/odoo/data
       - python-usr-local:/usr/local/lib/
       - python-usr:/usr/lib/
+      - ./odooo/entrypoint.sh:/home/odoo/odooo/entrypoint.sh 
     command: odoo --dev=all
     environment:
       PGHOST: postgres

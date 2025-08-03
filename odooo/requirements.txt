@@ -1,15 +1,3 @@
-fsspec==2025.5.1
-Unidecode==1.3.3
-PyMuPDF==1.26.1
-schwifty==2024.4.0
-sortedcontainers==2.1.0
-requests==2.32.4
-frontend==0.0.3
-pytesseract==0.3.13
-tesseract==0.1.3
-pdf2image==1.17.0
-opencv-python==4.11.0.86
-xlrd==2.0.1
-openpyxl==3.1.2
-gTTS==2.5.1
-SQLAlchemy==2.0.32
+# General requirements
+# Note: Each individual requirement from addons is installed in the entrypoint
+
