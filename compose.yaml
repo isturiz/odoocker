@@ -3,7 +3,6 @@ services:
     image: postgres:${POSTGRES_VERSION}
     container_name: ${PROJECT_NAME}_postgres
     environment:
-      PGHOST: postgres
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -41,21 +40,14 @@ services:
       - postgres
     volumes:
       - odoo-filestore:/var/lib/odoo
-      - ./src:/home/odoo/src
-      - odoo-data:/home/odoo/data
-      - python-usr-local:/usr/local/lib/
-      - python-usr:/usr/lib/
-      - ./odooo/entrypoint.sh:/home/odoo/odooo/entrypoint.sh 
+      - ./src:/mnt/extra-addons
+      - ./odoo/entrypoint.sh:/entrypoint.sh:ro
     command: odoo --dev=all
     environment:
       PGHOST: postgres
-      # Odoo config block
-      CUSTOM_CONFIG: |
-        [options]
-      CUSTOM_REQUIREMENTS: |
-        # Custom pip requirements
-      CUSTOM_ENTRYPOINT: |
-        #!/bin/bash
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       SMTP_SERVER: ${ODOO_SMTP_SERVER}
       SMTP_PORT: ${ODOO_SMTP_PORT}
       DBFILTER: ${ODOO_DBFILTER}
@@ -65,15 +57,14 @@ services:
       CUSTOM_ENABLED: ${CUSTOM_ENABLED}
       LIST_DB: ${ODOO_LIST_DB}
       WITHOUT_DEMO: ${ODOO_WITHOUT_DEMO}
-      ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD}
       PROXY_MODE: ${ODOO_PROXY_MODE}
       SERVER_MODE: ${ODOO_SERVER_MODE}
       AEROO_DOCS_HOST: ${AEROO_DOCS_HOST}
       LIMIT_TIME_REAL_CRON: ${ODOO_LIMIT_TIME_REAL_CRON}
       LIMIT_TIME_REAL: ${ODOO_LIMIT_TIME_REAL}
       UNACCENT: ${ODOO_UNACCENT}
-      LOG_LEVEL: info
-      PYTHONPATH: /opt/odoo:/home/odoo/src
+      ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD}
+      LOG_LEVEL: ${ODOO_LOG_LEVEL}
     ports:
       - "${ODOO_HOST_PORT}:${ODOO_CONTAINER_PORT}"
       - "${ODOO_HOST_PORT_XMLRPC}:${ODOO_CONTAINER_PORT_XMLRPC}"
@@ -84,9 +75,6 @@ services:
 volumes:
   pg-data:
   odoo-filestore:
-  odoo-data:
-  python-usr-local:
-  python-usr:
   pgadmin-data:
 
 networks:
