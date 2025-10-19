@@ -1,6 +1,7 @@
 backups/
 .env
-src/*
+src/**
+!src/**/.gitkeep
 /Dockerfile
 .DS_Store
 __pycache__/
