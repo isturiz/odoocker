@@ -11,7 +11,7 @@ USER root
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Odoo System dependencies (ref: https://github.com/odoo/docker/blob/master/18.0/Dockerfile#L14-L53)
+# Odoo System dependencies (ref: https://github.com/odoo/docker/blob/master/19.0/Dockerfile#L14-L53)
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
@@ -64,10 +64,10 @@ RUN apt-get update && \
 RUN npm install -g rtlcss
 
 # Install Odoo
-ARG ODOO_VERSION=18.0
+ARG ODOO_VERSION=19.0
 ENV ODOO_VERSION=${ODOO_VERSION}
 ARG ODOO_RELEASE=20251008
-ARG ODOO_SHA=c15a8eb3791e805b9cd3078f2dd4e0d78130b1c2
+ARG ODOO_SHA=36dde7d124ca4b0f957949f0b2c88b87d9da07f7
 
 RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/odoo_${ODOO_VERSION}.${ODOO_RELEASE}_all.deb \
     && echo "${ODOO_SHA} odoo.deb" | sha1sum -c - \
@@ -75,7 +75,7 @@ RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/od
     && apt-get -y install --no-install-recommends ./odoo.deb \
     && rm -rf /var/lib/apt/lists/* odoo.deb
 
-ADD --chown=${USERNAME} https://raw.githubusercontent.com/odoo/odoo/18.0/requirements.txt /tmp/requirements.txt
+ADD --chown=${USERNAME} https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
 
@@ -100,4 +100,3 @@ USER odoo
 ENTRYPOINT ["/entrypoint.sh"]
 
 CMD ["odoo"]
-

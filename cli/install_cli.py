@@ -1,12 +1,17 @@
 import click
 
+
 @click.command("install-cli")
-@click.option('--local', is_flag=True, help="Install in .bin directory for project-local usage")
+@click.option(
+    '--local',
+    is_flag=True,
+    help="Install in .bin directory for project-local usage"
+)
 def install_cli(local):
     """Install the odoo CLI as a symlink in a local .bin directory (default)"""
     from pathlib import Path
 
-    script_name = "odoo"
+    script_name = "odoocker"
     target_dir = Path(".bin") if local else Path.home() / ".local" / "bin"
     target_dir.mkdir(parents=True, exist_ok=True)
 
