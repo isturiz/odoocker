@@ -3,5 +3,6 @@ backups/
 src/**
 !src/**/.gitkeep
 /Dockerfile
+vendor/
 .DS_Store
 __pycache__/
