@@ -9,6 +9,7 @@ from .shell import sh, ps, status
 from .pgadmin import pgadmin
 from .build import build
 from .install_cli import install_cli
+from .odools_config import odools
 
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
@@ -28,6 +29,7 @@ cli.add_command(status)
 cli.add_command(pgadmin)
 cli.add_command(build)
 cli.add_command(install_cli)
+cli.add_command(odools)
 
 if __name__ == "__main__":
     cli()

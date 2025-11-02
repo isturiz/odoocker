@@ -4,5 +4,6 @@ src/**
 !src/**/.gitkeep
 /Dockerfile
 vendor/
+odools.toml
 .DS_Store
 __pycache__/
