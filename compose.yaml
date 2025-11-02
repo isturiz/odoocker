@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:${POSTGRES_VERSION}
+    ports:
+      - "${POSTGRES_HOST_PORT}:${POSTGRES_CONTAINER_PORT}"
     container_name: ${PROJECT_NAME}_postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -11,24 +13,6 @@ services:
       - pg-data:/var/lib/postgresql/data/pgdata
     networks:
       - internal
-    restart: unless-stopped
-
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: ${PROJECT_NAME}_pgadmin
-    ports:
-      - "${PGADMIN_HOST_PORT}:${PGADMIN_CONTAINER_PORT}"
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
-    networks:
-      - internal
-    profiles: ["tools"]
     restart: unless-stopped
 
   odoo:
@@ -45,7 +29,7 @@ services:
     command: odoo --dev=all
     environment:
       PGHOST: postgres
-      PGPORT: "5432"
+      PGPORT: ${POSTGRES_CONTAINER_PORT}
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       SMTP_SERVER: ${ODOO_SMTP_SERVER}
@@ -75,7 +59,6 @@ services:
 volumes:
   pg-data:
   odoo-filestore:
-  pgadmin-data:
 
 networks:
   internal:

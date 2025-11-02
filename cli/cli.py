@@ -5,8 +5,7 @@ from .db_backup import create_backup
 from .db_restore import restore_backup
 from .update_module import update_module
 from .manage_user import manage_user
-from .shell import sh, ps, status
-from .pgadmin import pgadmin
+from .shell import sh, ps
 from .build import build
 from .install_cli import install_cli
 from .odools_config import odools
@@ -25,8 +24,6 @@ cli.add_command(update_module)
 cli.add_command(manage_user)
 cli.add_command(sh)
 cli.add_command(ps)
-cli.add_command(status)
-cli.add_command(pgadmin)
 cli.add_command(build)
 cli.add_command(install_cli)
 cli.add_command(odools)
