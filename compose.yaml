@@ -26,7 +26,7 @@ services:
       - odoo-filestore:/var/lib/odoo
       - ./src:/mnt/extra-addons
       - ./odoo/entrypoint.sh:/entrypoint.sh:ro
-    command: odoo --dev=all
+    command: /bin/bash -c "if [ \"$$ODOO_DEBUG_MODE\" = \"1\" ]; then python3 -Xfrozen_modules=off -m debugpy --listen 0.0.0.0:5678 --wait-for-client /usr/bin/odoo --dev=all; else /usr/bin/odoo --dev=all; fi"
     environment:
       PGHOST: postgres
       PGPORT: ${POSTGRES_CONTAINER_PORT}
@@ -52,6 +52,7 @@ services:
     ports:
       - "${ODOO_HOST_PORT}:${ODOO_CONTAINER_PORT}"
       - "${ODOO_HOST_PORT_XMLRPC}:${ODOO_CONTAINER_PORT_XMLRPC}"
+      - "5678:5678"
     networks:
       - internal
     restart: unless-stopped

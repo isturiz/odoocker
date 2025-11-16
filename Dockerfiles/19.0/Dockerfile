@@ -77,6 +77,7 @@ RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/od
 
 ADD --chown=${USERNAME} https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir --break-system-packages debugpy
 
 
 # Environment variables for standard directories
