@@ -43,13 +43,6 @@ echo "---- odoo.conf used ----"
 cat /etc/odoo/odoo.conf
 echo "------------------------"
 
-# Install Python requirements declared by addons
-echo "Scanning addons for requirements.txt..."
-find /mnt/extra-addons -type f -name "requirements.txt" | while read -r reqfile; do
-    echo "Installing Python requirements from $reqfile"
-    pip3 install --no-cache-dir -r "$reqfile"
-done
-
 echo "Entrypoint running as $(whoami)"
 echo "Odoo version:"
 which odoo
