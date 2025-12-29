@@ -1,0 +1,34 @@
+{
+  "name": "Odoo (odoocker)",
+  "dockerComposeFile": ["../compose.yaml"],
+  "service": "odoo",
+
+  "workspaceFolder": "/var/lib/odoo",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces,type=bind,consistency=cached",
+
+  "forwardPorts": [8069, 8071, 8072],
+  "shutdownAction": "stopCompose",
+
+  "remoteUser": "odoo",
+  "overrideCommand": false,
+
+  "features": {
+    "./features/zoxide": {},
+    "ghcr.io/duduribeiro/devcontainer-features/neovim:1": {
+      "version": "stable"
+    },
+    "ghcr.io/devcontainers-extra/features/apt-get-packages:1": {
+      "packages": "git ripgrep fd-find build-essential pkg-config python3-dev"
+    },
+    "ghcr.io/meaningful-ooo/devcontainer-features/fish:2": {}
+  },
+
+  "mounts": [
+    "source=${localWorkspaceFolder}/odools.toml,target=/mnt/odools/odools_host,type=bind,consistency=cached,ro",
+    "source=${env:HOME}/.local/share/nvim/odoo,target=/mnt/odools_host,type=bind,consistency=cached,ro",
+    "source=${env:HOME}/.config/nvim,target=/var/lib/odoo/.config/nvim,type=bind,consistency=cached,ro",
+    "source=${env:HOME}/.config/fish,target=/var/lib/odoo/.config/fish,type=bind,consistency=cached,ro"
+  ],
+
+  "postCreateCommand": "mkdir -p ~/.local/bin && (command -v fdfind >/dev/null && ln -sf \"$(command -v fdfind)\" ~/.local/bin/fd || true)"
+}
