@@ -1,0 +1,49 @@
+services:
+  odoo:
+    container_name: ${PROJECT_NAME}
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ..:/workspace
+      - ../odools.toml:/home/odoo/odools.toml
+      - ${ODOO_BASE}:/workspace/odoo:ro
+      # - ${ENTERPRISE_ADDONS}:/workspace/enterprise:ro
+      - odoo-data:/var/lib/odoo
+    command: sleep infinity
+    # command: odoo --dev=all
+    ports:
+      - "8069:8069"
+      - "8071:8071"
+      - "8072:8072"
+    networks:
+      - internal
+      # - shared-net
+
+  pgdb:
+    image: postgres:17.0-alpine
+    restart: unless-stopped
+    container_name: pgdb
+    volumes:
+      - pgdb-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=odoo
+      - POSTGRES_USER=odoo
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - internal
+     # - shared-net
+
+volumes:
+  odoo-data:
+  pgdb-data:
+  pgadmin-data:
+
+networks:
+  internal:
+    driver: bridge
+  shared-net:
+    external: true
+    name: shared-net

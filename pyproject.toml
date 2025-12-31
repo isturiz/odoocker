@@ -1,0 +1,32 @@
+[project]
+name = "odoo19_realista"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "num2words",
+    "ofxparse",
+    "dbfread",
+    "ebaysdk",
+    "firebase_admin",
+    "pyOpenSSL",
+    "phonenumbers",
+    "openupgradelib",
+    "git-aggregator",
+    "copier",
+    "pre-commit",
+    "debugpy",
+    "pydevd-odoo",
+    "pylint_odoo",
+    "invoke",
+    "ensurepath",
+    "PyYAML",
+    "ruff",
+    "black",
+    "types-invoke",
+    "openpyxl-stubs",
+    "click-odoo-contrib",
+    "xmltodict",
+    "suds",
+]

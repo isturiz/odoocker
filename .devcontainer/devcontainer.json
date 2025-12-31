@@ -1,0 +1,45 @@
+{
+  "name": "Odoocker",
+  "dockerComposeFile": "compose.yaml",
+  "service": "odoo",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "mvintg.odoo-file",
+        "odoo.owl-vision",
+        "trinhanhngoc.vscode-odoo",
+        "esbenp.prettier-vscode",
+        "charliermarsh.ruff",
+        "DotJoshJohnson.xml",
+        "codezombiech.gitignore",
+        "usernamehw.errorlens",
+        "formulahendry.auto-complete-tag",
+        "mrorz.language-gettext",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "python.languageServer": "None",
+        "editor.tabSize": 4,
+        "terminal.integrated.cursorStyle": "underline",
+        "terminal.integrated.cursorBlinking": true,
+        "terminal.integrated.fontFamily": "Cascadia Code NF",
+        "terminal.integrated.fontLigatures.enabled": true,
+        "terminal.integrated.defaultProfile.linux": "fish",
+        "python.defaultInterpreterPath": ".venv/bin/python",
+        "python.terminal.activateEnvInCurrentTerminal": true
+      }
+    }
+  },
+  "mounts": [
+    {
+      "source": "${localEnv:HOME}/.ssh",
+      "target": "/home/odoo/.ssh",
+      "type": "bind"
+    }
+  ],
+  "remoteUser": "odoo",
+  "containerUser": "odoo"
+}
