@@ -1,0 +1,108 @@
+## Lista de repositorios de addons a clonar.
+## Formato:
+##
+## [[third-party]]
+## name = "nombre_carpeta_local"   # opcional; si no se indica, se usa el nombre del repo
+## url = "https://github.com/organizacion/repositorio.git"
+## branch = "main"                 # opcional; por defecto la rama por defecto del repo
+##
+## [[oca]]
+## name = "sale-workflow"
+## url = "https://github.com/OCA/sale-workflow.git"
+## branch = "16.0"
+##
+## [[custom]]
+## name = "mi_addon_personal"
+## url = "git@github.com:mi-org/mi_addon_personal.git"
+## branch = "master"
+##
+## Para añadir más repositorios, duplica los bloques [[third-party]], [[oca]] o [[custom]].
+
+[[third-party]]
+url = "git@github.com:isturiz/oi_login_as.git"
+
+[[custom]]
+name = "camptocamp"
+url = "https://github.com/camptocamp/partner-contact.git"
+branch = "19-mig-partner-firstname"
+
+[[oca]]
+url = "git@github.com:OCA/l10n-spain.git"
+branch = "19.0"
+
+[[oca]]
+url = "git@github.com:OCA/community-data-files.git"
+branch = "19.0"
+
+[[oca]]
+url = "git@github.com:OCA/multi-company.git"
+branch = "19.0"
+
+[[oca]]
+url = "git@github.com:OCA/crm.git"
+branch = "19.0"
+
+[[oca]]
+url = "git@github.com:OCA/partner-contact.git"
+branch = "19.0"
+
+[[custom]]
+name = "crm_lost_reason_multi_company"
+url = "git@github.com:isturiz/multi-company.git"
+branch = "19.0-mig-crm_lost_reason_multi_company"
+
+[[custom]]
+name = "crm_stage_multi_company"
+url = "git@github.com:isturiz/multi-company.git"
+branch = "19.0-mig-crm_stage_multi_company"
+
+[[custom]]
+name = "crm_tag_multi_company"
+url = "git@github.com:isturiz/multi-company.git"
+branch = "19.0-mig-crm_tag_multi_company"
+
+[[custom]]
+name = "ir_filters_multi_company"
+url = "git@github.com:isturiz/multi-company.git"
+branch = "19.0-mig-ir_filters_multi_company"
+
+[[custom]]
+name = "partner_category_multi_company"
+url = "git@github.com:isturiz/multi-company.git"
+branch = "19.0-mig-partner_category_multi_company"
+
+[[custom]]
+name = "partner_category_type"
+url = "git@github.com:Hudson5577/partner-contact.git"
+branch = "19.0-mig-partner_category_type"
+
+[[custom]]
+name = "partner_contact_birthdate"
+url = "git@github.com:BizzAppDev-Systems/partner-contact.git"
+branch = "19.0-mig-partner_contact_birthdate-BAD"
+
+[[custom]]
+name = "partner_contact_nationality"
+url = "git@github.com:isturiz/partner-contact.git"
+branch = "19.0-mig-partner_contact_nationality"
+
+[[custom]]
+name = "partner_contact_personal_information_page"
+url = "git@github.com:BizzAppDev-Systems/partner-contact.git"
+branch = "19.0-mig-partner_contact_personal_information_page-BAD"
+
+[[custom]]
+name = "partner_multi_relation"
+url = "git@github.com:Therp/partner-contact.git"
+branch = "19.0-mig-partner_multi_relation"
+
+[[custom]]
+name = "web"
+url = "git@github.com:isturiz/web.git"
+branch = "19.0"
+
+[[custom]]
+name = "web_widget_open_tab"
+url = "git@github.com:isturiz/web.git"
+branch = "19.0-mig-web_widget_open_tab"
+
