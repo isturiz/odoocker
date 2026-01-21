@@ -25,7 +25,9 @@ services:
     restart: unless-stopped
     container_name: pgdb
     volumes:
-      - pgdb-data:/var/lib/postgresql/data
+      # For PostgreSQL 18+ we mount the parent dir so the versioned cluster
+      # layout (/var/lib/postgresql/18/main) can be created correctly.
+      - pgdb-data:/var/lib/postgresql
     environment:
       - POSTGRES_PASSWORD=odoo
       - POSTGRES_USER=odoo
