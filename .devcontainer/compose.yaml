@@ -1,15 +1,17 @@
 services:
   odoo:
-    container_name: ${PROJECT_NAME}
+    container_name: ${COMPOSE_PROJECT_NAME}_odoo
     build:
       context: .
       dockerfile: ./Dockerfile
     volumes:
       - ..:/workspace
-      - ../odools.toml:/home/odoo/odools.toml
+      # - ../odools.toml:/home/odoo/.config/odools.toml:ro
       - ${ODOO_BASE}:/workspace/odoo:ro
-      # - ${ENTERPRISE_ADDONS}:/workspace/enterprise:ro
+      - ${ENTERPRISE_ADDONS}:/workspace/enterprise:ro
       - odoo-data:/var/lib/odoo
+      - ${HOME}/.local/share/opencode:/home/odoo/.local/share/opencode
+      - ${HOME}/.config/opencode:/home/odoo/.config/opencode
     command: sleep infinity
     # command: odoo --dev=all
     ports:
@@ -21,9 +23,9 @@ services:
       # - shared-net
 
   pgdb:
-    image: postgres:17.0-alpine
+    image: pgvector/pgvector:pg18
     restart: unless-stopped
-    container_name: pgdb
+    container_name: ${COMPOSE_PROJECT_NAME}_pgdb
     volumes:
       # For PostgreSQL 18+ we mount the parent dir so the versioned cluster
       # layout (/var/lib/postgresql/18/main) can be created correctly.
@@ -49,3 +51,4 @@ networks:
   shared-net:
     external: true
     name: shared-net
+

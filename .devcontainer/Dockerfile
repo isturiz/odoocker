@@ -135,3 +135,16 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 RUN SNIPPET="autoload -Uz add-zsh-hook; append_history() { fc -W }; add-zsh-hook precmd append_history; export HISTFILE=/commandhistory/.zsh_history" \
     && echo "$SNIPPET" >> "$USER_HOME/.zshrc"
 
+# Install opencode as root and copy binary to global PATH (detect installed path via bashrc)
+USER root
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    OC_BIN=$(bash -lc 'source /root/.bashrc >/dev/null 2>&1; command -v opencode') && \
+    install -m 755 "$OC_BIN" /usr/local/bin/opencode
+
+# Create and fix permissions for opencode directories
+RUN mkdir -p /home/$USERNAME/.local/state /home/$USERNAME/.local/share /home/$USERNAME/.config && \
+    chown -R $USERNAME:$USERNAME /home/$USERNAME/.local /home/$USERNAME/.config
+
+USER $USERNAME
+
+

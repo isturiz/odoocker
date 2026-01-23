@@ -18,7 +18,9 @@
         "usernamehw.errorlens",
         "formulahendry.auto-complete-tag",
         "mrorz.language-gettext",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
       ],
       "settings": {
         "python.languageServer": "None",
@@ -38,8 +40,29 @@
       "source": "${localEnv:HOME}/.ssh",
       "target": "/home/odoo/.ssh",
       "type": "bind"
+    },
+    {
+      "source": "${localEnv:HOME}/.local/share/opencode",
+      "target": "/home/odoo/.local/share/opencode",
+      "type": "bind"
+    },
+    {
+      "source": "${localEnv:HOME}/.config/opencode",
+      "target": "/home/odoo/.config/opencode",
+      "type": "bind"
+    },
+    {
+      "source": "${localEnv:HOME}/.local/share/fish",
+      "target": "/home/odoo/.local/share/fish",
+      "type": "bind"
+    },
+    {
+      "source": "${localEnv:HOME}/.config/fish",
+      "target": "/home/odoo/.config/fish",
+      "type": "bind"
     }
   ],
   "remoteUser": "odoo",
   "containerUser": "odoo"
 }
+
