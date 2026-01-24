@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -47,9 +47,15 @@ class RepoSpec:
     name: str
     url: str
     branch: Optional[str] = None
+    subpath: Optional[str] = None
 
 
-def load_config(path: Path) -> Dict[str, List[RepoSpec]]:
+@dataclass
+class ConfigOptions:
+    preserve_addons_path: list[str] = field(default_factory=list)
+
+
+def load_config(path: Path) -> tuple[Dict[str, List[RepoSpec]], ConfigOptions]:
     try:
         import tomllib  # Python 3.11+
     except ModuleNotFoundError as exc:  # pragma: no cover - entorno antiguo
@@ -82,12 +88,22 @@ def load_config(path: Path) -> Dict[str, List[RepoSpec]]:
                 name = derive_name_from_url(url)
 
             branch = entry.get("branch")
-            repos.append(RepoSpec(section=section, name=name, url=url, branch=branch))
+            subpath = entry.get("subpath")
+            repos.append(RepoSpec(section=section, name=name, url=url, branch=branch, subpath=subpath))
 
         if repos:
             config[section] = repos
 
-    return config
+    options_raw = raw.get("options", {})
+    preserve_addons_path: list[str] = []
+    if isinstance(options_raw, dict):
+        value = options_raw.get("preserve_addons_path", [])
+        if isinstance(value, str):
+            preserve_addons_path = [value]
+        elif isinstance(value, list):
+            preserve_addons_path = [item for item in value if isinstance(item, str)]
+
+    return config, ConfigOptions(preserve_addons_path=preserve_addons_path)
 
 
 def derive_name_from_url(url: str) -> str:
@@ -115,13 +131,21 @@ def run_cmd(cmd: Iterable[str], cwd: Optional[Path] = None) -> int:
         raise SystemExit("Error: `git` no está instalado o no se encuentra en PATH.")
 
 
-def clone_or_update_repo(base_dir: Path, spec: RepoSpec) -> None:
+def is_git_repo(path: Path) -> bool:
+    git_entry = path / ".git"
+    return path.is_dir() and git_entry.exists()
+
+
+def clone_or_update_repo(base_dir: Path, spec: RepoSpec) -> bool:
     target_root = base_dir / spec.section
     ensure_dir(target_root)
 
     target_dir = target_root / spec.name
 
     if target_dir.is_dir():
+        if not is_git_repo(target_dir):
+            print(f"\nAviso: {target_dir} existe pero no es un repo git, se omite.")
+            return False
         print(f"\nRepositorio ya existe, actualizando: {target_dir}")
         # git fetch y checkout de rama (si se especifica)
         rc = run_cmd(["git", "fetch", "--all", "--prune"], cwd=target_dir)
@@ -140,6 +164,11 @@ def clone_or_update_repo(base_dir: Path, spec: RepoSpec) -> None:
         rc = run_cmd(cmd)
         if rc != 0:
             print(f"  Error al clonar {spec.url} (código {rc})")
+            return False
+        if not is_git_repo(target_dir):
+            print(f"  Error: {target_dir} no parece un repo git tras clonar.")
+            return False
+    return True
 
 
 def parse_addons_path(content: str) -> tuple[list[str], int, int]:
@@ -168,17 +197,17 @@ def parse_addons_path(content: str) -> tuple[list[str], int, int]:
                         if path:
                             paths.append(path)
             
-            # Buscar líneas de continuación
+            # Buscar líneas de continuación (mientras estén indentadas)
             j = i + 1
             while j < len(lines):
                 line_raw = lines[j]
                 cont_line = line_raw.strip()
-                
+
                 # Si es línea vacía o comentario, continuar (puede haber líneas vacías en medio)
                 if not cont_line or cont_line.startswith("#"):
                     j += 1
                     continue
-                
+
                 # Si empieza con espacio o tab, es continuación
                 if line_raw.startswith((" ", "\t")):
                     # Limpiar backslashes y espacios
@@ -189,21 +218,22 @@ def parse_addons_path(content: str) -> tuple[list[str], int, int]:
                             path = path.strip().rstrip("\\").strip()
                             if path:
                                 paths.append(path)
-                    # Si no termina en \, es la última línea de continuación
-                    if not cont_line.endswith("\\"):
-                        j += 1
-                        break
                     j += 1
-                else:
-                    # No es continuación, terminar
-                    break
+                    continue
+
+                # No es continuación, terminar
+                break
             end_line = j
             break
     
     return paths, start_line, end_line
 
 
-def update_odoo_conf_addons_path(conf_path: Path, repo_paths: list[str]) -> bool:
+def update_odoo_conf_addons_path(
+    conf_path: Path,
+    repo_paths: list[str],
+    preserve_addons_path: list[str],
+) -> bool:
     """
     Actualiza el addons_path en odoo.conf añadiendo las rutas de cada repo clonado.
     Retorna True si se hizo algún cambio.
@@ -219,26 +249,32 @@ def update_odoo_conf_addons_path(conf_path: Path, repo_paths: list[str]) -> bool
         print(f"\nAviso: No se encontró 'addons_path' en {conf_path}.")
         return False
 
-    # Solo añadir rutas faltantes, respetando el orden de repo_paths
-    missing_paths = [path for path in repo_paths if path not in paths]
-
-    # Detectar si el bloque actual usa backslashes o formato que conviene normalizar
     lines = content.splitlines()
-    current_block = lines[start_line:end_line]
-    needs_format_fix = any("\\" in line for line in current_block)
 
-    if not missing_paths and not needs_format_fix:
+    preserved: list[str] = []
+    if preserve_addons_path:
+        for path in paths:
+            if path in preserved:
+                continue
+            if any(path == keep for keep in preserve_addons_path):
+                preserved.append(path)
+
+    new_paths: list[str] = []
+    for path in preserved + repo_paths:
+        if path in new_paths:
+            continue
+        new_paths.append(path)
+
+    if new_paths == paths:
         print(f"\naddons_path en {conf_path} ya contiene todas las rutas necesarias.")
         return False
-
-    paths.extend(missing_paths)
 
     # Reconstruir el contenido con formato multilínea sin usar backslashes,
     # dejando cada ruta separada por comas para que configparser la procese bien.
     new_lines = lines[:start_line]
 
-    for i, path in enumerate(paths):
-        suffix = "," if i < len(paths) - 1 else ""
+    for i, path in enumerate(new_paths):
+        suffix = "," if i < len(new_paths) - 1 else ""
         line_value = f"{path}{suffix}"
         if i == 0:
             new_lines.append(f"addons_path = {line_value}")
@@ -248,10 +284,7 @@ def update_odoo_conf_addons_path(conf_path: Path, repo_paths: list[str]) -> bool
     new_lines.extend(lines[end_line:])
 
     conf_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    if missing_paths:
-        print(f"\n✓ Actualizado {conf_path}: añadidas rutas {', '.join(missing_paths)}")
-    else:
-        print(f"\n✓ Normalizado addons_path en {conf_path}")
+    print(f"\n✓ Actualizado addons_path en {conf_path}")
     return True
 
 
@@ -261,7 +294,11 @@ def build_repo_paths(base_dir: Path, config: Dict[str, List[RepoSpec]]) -> list[
     seen: set[str] = set()
     for section, repos in config.items():
         for spec in repos:
-            path = str(base_dir / section / spec.name)
+            base_path = base_dir / section / spec.name
+            if spec.subpath:
+                path = str(base_path / spec.subpath)
+            else:
+                path = str(base_path)
             if path in seen:
                 continue
             seen.add(path)
@@ -282,22 +319,38 @@ def main(argv: List[str]) -> int:
 
     ensure_dir(base_dir)
 
-    config = load_config(config_path)
+    config, options = load_config(config_path)
     if not config:
         print("No se encontraron repositorios en la configuración.")
         return 0
 
+    repo_paths: list[str] = []
+    seen_paths: set[str] = set()
     for section, repos in config.items():
         print(f"\n=== Sección: {section} ===")
         for spec in repos:
-            clone_or_update_repo(base_dir, spec)
+            ok = clone_or_update_repo(base_dir, spec)
+            if not ok:
+                continue
+            base_path = base_dir / section / spec.name
+            if spec.subpath:
+                repo_path = str(base_path / spec.subpath)
+            else:
+                repo_path = str(base_path)
+            if repo_path in seen_paths:
+                continue
+            seen_paths.add(repo_path)
+            repo_paths.append(repo_path)
 
     # Actualizar odoo.conf con rutas de cada repo clonado
-    repo_paths = build_repo_paths(base_dir, config)
     if repo_paths:
         script_dir = Path(__file__).resolve().parent
         odoo_conf_path = script_dir / ODOO_CONF_DEFAULT
-        update_odoo_conf_addons_path(odoo_conf_path, repo_paths)
+        update_odoo_conf_addons_path(
+            odoo_conf_path,
+            repo_paths,
+            options.preserve_addons_path,
+        )
 
     print("\nProceso terminado.")
     return 0
@@ -305,4 +358,5 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
 

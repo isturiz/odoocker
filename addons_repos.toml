@@ -5,6 +5,7 @@
 ## name = "nombre_carpeta_local"   # opcional; si no se indica, se usa el nombre del repo
 ## url = "https://github.com/organizacion/repositorio.git"
 ## branch = "main"                 # opcional; por defecto la rama por defecto del repo
+## subpath = "custom_addons"       # opcional; subcarpeta dentro del repo donde están los módulos
 ##
 ## [[oca]]
 ## name = "sale-workflow"
