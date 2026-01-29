@@ -20,14 +20,14 @@
         "mrorz.language-gettext",
         "eamodio.gitlens",
         "GitHub.copilot",
-        "GitHub.copilot-chat"
+        "GitHub.copilot-chat",
+        "openai.chatgpt",
+        "Odoo.odoo"
       ],
       "settings": {
-        "python.languageServer": "None",
         "editor.tabSize": 4,
         "terminal.integrated.cursorStyle": "underline",
         "terminal.integrated.cursorBlinking": true,
-        "terminal.integrated.fontFamily": "Cascadia Code NF",
         "terminal.integrated.fontLigatures.enabled": true,
         "terminal.integrated.defaultProfile.linux": "fish",
         "python.defaultInterpreterPath": ".venv/bin/python",

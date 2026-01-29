@@ -6,12 +6,9 @@ services:
       dockerfile: ./Dockerfile
     volumes:
       - ..:/workspace
-      # - ../odools.toml:/home/odoo/.config/odools.toml:ro
       - ${ODOO_BASE}:/workspace/odoo:ro
       - ${ENTERPRISE_ADDONS}:/workspace/enterprise:ro
       - odoo-data:/var/lib/odoo
-      - ${HOME}/.local/share/opencode:/home/odoo/.local/share/opencode
-      - ${HOME}/.config/opencode:/home/odoo/.config/opencode
     command: sleep infinity
     # command: odoo --dev=all
     ports:
