@@ -1,11 +1,12 @@
 [project]
-name = "odoo19_realista"
+name = "odoo_dev"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "inotify",
+    "pdfminer.six",
     "aiohttp",
     "setuptools",
     "num2words",
@@ -32,4 +33,18 @@ dependencies = [
     "click-odoo-contrib",
     "xmltodict",
     "suds",
+    "fsspec==2025.5.1",
+    "Unidecode==1.3.3",
+    "PyMuPDF==1.26.1",
+    "schwifty==2024.4.0",
+    "sortedcontainers==2.1.0",
+    "requests==2.31.0",
+    "frontend==0.0.3",
+    "pytesseract==0.3.13",
+    "tesseract==0.1.3",
+    "pdf2image==1.17.0",
+    "opencv-python==4.11.0.86",
+    "pyjwt",
+    "openpyxl==3.1.2",
+    "SQLAlchemy",
 ]

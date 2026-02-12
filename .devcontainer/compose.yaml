@@ -8,16 +8,14 @@ services:
       - ..:/workspace
       - ${ODOO_BASE}:/workspace/odoo:ro
       - ${ENTERPRISE_ADDONS}:/workspace/enterprise:ro
-      - odoo-data:/var/lib/odoo
+      - odoo-data:/home/odoo/.local/share/Odoo
     command: sleep infinity
-    # command: odoo --dev=all
     ports:
       - "8069:8069"
       - "8071:8071"
       - "8072:8072"
     networks:
       - internal
-      # - shared-net
 
   pgdb:
     image: pgvector/pgvector:pg18
@@ -35,7 +33,6 @@ services:
       - "5432:5432"
     networks:
       - internal
-     # - shared-net
 
 volumes:
   odoo-data:
@@ -45,7 +42,3 @@ volumes:
 networks:
   internal:
     driver: bridge
-  shared-net:
-    external: true
-    name: shared-net
-

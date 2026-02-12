@@ -43,6 +43,7 @@ RUN apt-get update && \
     fish \
     lsb-release \
     rsync \
+    iproute2 \
     && apt-get autoremove -yqq
 
 # Install rtlcss
@@ -146,5 +147,4 @@ RUN mkdir -p /home/$USERNAME/.local/state /home/$USERNAME/.local/share /home/$US
     chown -R $USERNAME:$USERNAME /home/$USERNAME/.local /home/$USERNAME/.config
 
 USER $USERNAME
-
 

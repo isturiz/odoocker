@@ -10,8 +10,12 @@ wheels/
 
 # Virtual environments
 .venv
+uv.lock
 
 # odoo
 enterprise
 odoo
 addons
+backups/*
+!backups/.gitkeep
+

@@ -8,5 +8,7 @@
   ],
   "python.analysis.typeCheckingMode": "off",
   "python.analysis.autoSearchPaths": true,
-  "python-envs.pythonProjects": []
+  "python-envs.pythonProjects": [],
+  "python.languageServer": "None"
 }
+
