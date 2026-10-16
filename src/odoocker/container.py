@@ -9,7 +9,7 @@ import signal
 import socket
 import subprocess
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from .errors import OdxError
@@ -53,12 +53,26 @@ def require_ready():
     stamp = STATE / "dependencies.json"
     if not Path(PYTHON).is_file() or not stamp.exists():
         raise OdxError("Linux dependencies are not installed; run odx deps")
-    if json.loads(stamp.read_text()).get("fingerprint") != dependency_fingerprint():
+    try:
+        metadata = json.loads(stamp.read_text())
+    except ValueError as error:
+        raise OdxError("Invalid dependency marker; run odx deps") from error
+    if not isinstance(metadata, dict) or metadata.get("fingerprint") != dependency_fingerprint():
         raise OdxError("Dependency declarations changed; run odx deps before executing Odoo")
 
 
-def install_dependencies():
-    with locked(STATE / "environment.lock"):
+def install_dependencies(*, environment_locked=False, only_if_needed=False):
+    # setup holds the Linux maintenance lease in another container for the whole
+    # preparation. Normal `odx deps` still acquires its own exclusive lock.
+    with nullcontext() if environment_locked else locked(STATE / "environment.lock"):
+        if only_if_needed:
+            try:
+                require_ready()
+            except (OdxError, ValueError):
+                pass
+            else:
+                print("Dependencies unchanged; using the prepared Linux environment")
+                return 0
         # An interrupted or failed installation must not leave a ready marker.
         (STATE / "dependencies.json").unlink(missing_ok=True)
         if not Path(PYTHON).is_file():

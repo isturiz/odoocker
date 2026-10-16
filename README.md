@@ -142,10 +142,8 @@ uv run odx --help
 
 uv run odx init ../workspaces/mi-cliente --odoo 19.0
 uv run odx --workspace ../workspaces/mi-cliente fetch
-uv run odx --workspace ../workspaces/mi-cliente up
-uv run odx --workspace ../workspaces/mi-cliente deps
+uv run odx --workspace ../workspaces/mi-cliente setup --code
 uv run odx --workspace ../workspaces/mi-cliente run --init base --stop-after-init
-uv run odx --workspace ../workspaces/mi-cliente up --code --no-build
 uv run odx --workspace ../workspaces/mi-cliente code opencode --info
 uv run odx --workspace ../workspaces/mi-cliente code opencode
 ```
@@ -168,6 +166,59 @@ uv run --project /ruta/al/odoocker odx status
 
 No es necesario instalar la herramienta ni reemplazar `odx.fish`/`oc.fish` solo
 para probar el checkout. El flujo con `uv run` sigue siendo útil al desarrollar el motor.
+
+### Preparación inicial en un comando
+
+Después de definir la configuración y los repositorios del cliente:
+
+```sh
+odx fetch
+odx setup --code
+```
+
+`setup` coordina **configure -> up -> deps**, y `--code` añade el arranque de
+OpenCode después de preparar las dependencias. Sin el flag solo prepara Odoo y
+PostgreSQL; si OpenCode ya estaba en marcha, comprueba que esté inactivo, lo para
+durante la preparación y lo vuelve a levantar al terminar. Los comandos individuales
+siguen disponibles para diagnóstico y operaciones específicas.
+
+El comando no clona fuentes (eso sigue siendo `fetch`), no ejecuta Odoo, no instala
+módulos ni crea la base `dev`, no restaura datos, no actualiza repositorios y no
+cambia las versiones del manifiesto. Para una base nueva, decide explícitamente:
+
+```sh
+odx run --init base --stop-after-init
+```
+
+Se puede repetir `setup`: aprovecha la caché Docker y omite la instalación Python
+cuando el intérprete y el marcador de dependencias coinciden con el fingerprint
+de los requirements actuales. No es un lock reproducible ni una comprobación de
+todos los paquetes; para reinstalar deliberadamente, usa `odx deps`. Los includes
+`-r`/`-c` indirectos todavía requieren esa ejecución explícita si cambian.
+
+La construcción se prepara en un directorio temporal, sin reemplazar archivos
+montados por los servicios. Antes de regenerar configuración, mover servicios o
+tocar paquetes, se adquieren bloqueos Linux de entorno y base habitual, que se
+mantienen hasta finalizar. Si hay un `run`, test o `deps` gestionado activo, rechaza
+la preparación sin detenerlo: puede haber construido capas de imagen, pero no ha
+reemplazado la configuración activa ni cambiado el virtualenv.
+
+Una sesión OpenCode activa en primer plano también bloquea la operación. Como con
+el updater, cierra los clientes y evita procesos externos durante mantenimiento:
+los bloqueos `odx` no coordinan comandos Docker externos ni todos los procesos del
+agente. Si falla una fase, no continúa con las siguientes ni elimina volúmenes;
+un OpenCode detenido puede quedar parado y una instalación fallida invalida su
+marcador. Corrige la causa y repite `setup --code`.
+
+`setup --code` respeta la versión fijada, aunque no coincida con el host: prepara
+el servidor y avisa de que debes ejecutar `odx code opencode update` antes de
+conectar cuando el host es más nuevo. Si el host es anterior, indica que debes
+actualizarlo, no hacer downgrade del contenedor. Así también se puede completar
+una primera instalación con un pin antiguo.
+Si coinciden, comprueba la API autenticada al terminar. Un cambio manual del pin
+de una instancia ya generada se rechaza: las actualizaciones con estado deben pasar
+por el comando con respaldo, no por `setup`. Los cambios de major PostgreSQL/Odoo
+también siguen requiriendo sus decisiones explícitas de aislamiento.
 
 ### Reutilizar fuentes locales sin modificarlas
 

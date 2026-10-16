@@ -278,3 +278,41 @@ OpenCode. No migrar ni limpiar automáticamente entornos existentes.
   revisión instalada sin ejecutar el updater sobre ningún workspace del usuario.
 - La instalación/actualización de la CLI y la actualización del servidor OpenCode
   son operaciones independientes; los contenedores solo cambian por petición explícita.
+
+## Preparación inicial simplificada
+
+- [x] Añadir `odx setup` y `odx setup --code`, conservando configure/up/deps y fetch
+  individuales; no inicializar/restaurar bases ni modificar pins automáticamente.
+- [x] Preparar la construcción por separado, adquirir leases Linux de entorno/base
+  habitual y mantenerlos durante configure/up/deps y el arranque opcional de OpenCode.
+- [x] Reutilizar el protocolo de mantenimiento existente con el updater OpenCode,
+  sin duplicar lógica de procesos ni añadir un framework de orquestación.
+- [x] Omitir deps cuando el intérprete y el marcador/fingerprint actuales son válidos;
+  mantener `odx deps` como reinstalación explícita y conservar las limitaciones de includes.
+- [x] Rechazar operaciones gestionadas/sesiones activas sin detenerlas; conservar un
+  OpenCode previamente activo aunque setup se invoque sin --code, y avisar de pins
+  host/contenedor distintos sin actualizarlos ni impedir la preparación inicial.
+- [x] Pruebas automatizadas de orden, fallos por fase, primera instalación,
+  configuración concurrente, locks, conservación del manifiesto y no inicialización DB.
+- [x] 455 pruebas automatizadas superadas y Ruff correcto, incluidas regresiones del
+  updater tras compartir la gestión de leases y marcadores de deps corruptos/no objeto.
+- [x] Primera instalación real `setup --code` en el workspace propio `setup-smoke`:
+  Odoo 19, PostgreSQL 16, 66 paquetes compatibles y OpenCode 2.0.31 con API autenticada.
+- [x] Repetir setup sin --code conserva el OpenCode antes activo y el ID PostgreSQL;
+  no reinstala paquetes (contenido y mtime ns del marcador intactos), no cambia
+  manifiesto y no crea `dev`. Temporales de construcción eliminados al terminar.
+- [x] Un lock real ocupado rechaza setup sin alterar IDs de contenedores ni Compose.
+- [x] Un requirement inválido de prueba detiene deps antes del arranque OpenCode,
+  elimina el marcador de listo y libera locks. Restaurar solo ese fixture y repetir
+  setup --code recupera el entorno y pasa uv pip check.
+- [x] Updater con respaldo sigue funcionando en ese workspace tras extraer las
+  utilidades compartidas; smoke Odoo 19 correcto con una prueba y limpieza de recursos.
+- [x] Parar el workspace de validación conservando volúmenes/respaldos; ningún
+  contenedor Realista ni sandbox existente se recrea en esta entrega.
+- [x] Construir wheel/sdist y comprobar `odx setup --help` desde el wheel instalado
+  en un entorno aislado.
+- Distribución explícita: publicar en GitHub/main y actualizar la CLI con
+  `uv tool upgrade odoocker`, conservando el origen Git. Comprobar el help del
+  comando instalado sin preparar automáticamente los servicios del cliente.
+- `odx fetch` sigue siendo independiente: clona solo fuentes ausentes y conserva
+  repositorios, ramas y cambios existentes; no equivale a pull ni a setup.
