@@ -1,21 +1,13 @@
-.DS_Store
-
-# Python-generated files
+.venv/
 __pycache__/
-*.py[oc]
-build/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-uv.lock
-
-# odoo
-enterprise
-odoo
-addons
-backups/*
-!backups/.gitkeep
-
+*.egg-info/
+.DS_Store
+.odoocker/
+odoocker.local.toml
+.env
+.env.*
+!.env.example
