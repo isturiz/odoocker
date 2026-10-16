@@ -1,38 +1,35 @@
-# AGENTS.md
+# Odoocker
 
-## Project overview
-- Repo for an Odoo 19 workspace with addons in `addons/` and optional enterprise code mounted at `/workspace/enterprise`.
-- Odoo source is expected at `/workspace/odoo` (mounted via the devcontainer).
-- Configuration lives in `odoo.conf`, including `addons_path` and DB settings.
+Shared development-only engine, not a copied client template. Python 3.12+, uv,
+Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 
-## Dev environment
-- Primary workflow uses the devcontainer in `.devcontainer/devcontainer.json` and `.devcontainer/compose.yaml` (services: `odoo`, `pgdb`).
-- Python 3.12 is required (`.python-version`), with a virtualenv at `/workspace/.venv`.
-- Dependency install (per `README.md`):
-  - `uv sync`
-  - `uv pip install -r odoo/requirements.txt`
+## Safety
 
-## Addons management
-- Declare addon repos in `addons_repos.toml` under `third-party`, `oca`, or `custom`.
-- Run `python clone_addons_repos.py` to clone/update repos into `/workspace/addons/<section>` and refresh `addons_path` in `odoo.conf`.
-- Optional env vars: `ADDONS_BASE_DIR` (base path), `ADDONS_CONFIG` (config path).
+- Do not modify existing Realista projects, containers, global Fish functions,
+  global OpenCode configuration or their persistent state.
+- Run Docker commands with an explicit generated Compose file and project ID.
+- Never remove volumes implicitly or mount the Docker socket in agent containers.
+- No production management or automatic migration of existing workspaces.
+- Keep secrets and machine-specific paths out of committed examples.
 
-## Running Odoo
-- Use `odoo.conf` for ports and DB (host `pgdb`, user/password `odoo`).
-- From `/workspace/odoo`, run `./odoo-bin -c /workspace/odoo.conf --dev=all` (or `odoo --dev=all` if available).
+## Architecture
 
-## Testing
-- No dedicated test runner is configured in this repo.
-- For addon tests, use Odoo built-in testing with `./odoo-bin -c /workspace/odoo.conf --test-enable -i <module>` and focus on changed modules.
+- `config.py`: validated declarative workspace and local configuration.
+- `runtime.py`: resource identity and generated Docker/Odoo configuration.
+- `cli.py`: host-facing commands; keep subprocess arguments as lists.
+- `adapters/opencode.py`: OpenCode-specific connection behavior.
+- `container.py`: in-container Odoo commands; no Docker access required.
+- OpenCode owns its native worktrees. Do not implement a competing Git manager.
+- Add adapters only for actual needs; no plugin framework or generic orchestrator.
+- Update `TODO.md` after each delivery; distinguish automated tests from live validation.
 
-## Conventions
-- Follow standard Odoo addon structure: `__manifest__.py`, `__init__.py`, `models/`, `views/`, `security/`.
-- Prefer changes in `addons/custom` and avoid editing OCA/third-party code unless required by the task.
+## Checks
 
-## Odoo coding guidelines
-- Follow the official Odoo coding guidelines for new code; see `ODOO_CODING_GUIDELINES.rst`.
-- When editing existing files in stable branches, keep the original style and minimize diffs.
-- In development branches, apply guidelines only to changed code unless doing large refactors (split move + feature).
-- Respect Odoo module structure and file naming rules for models, views, security, data, reports, and wizards.
-- Follow XML ID naming conventions for views/actions/menus/security and keep translation strings literal.
-- Avoid manual `cr.commit()`/`cr.rollback()` unless you created your own cursor; use savepoints for handled exceptions.
+```sh
+uv sync --group dev
+uv run pytest
+uv run ruff check .
+```
+
+Use `uv run odx` to exercise the prototype without replacing global `odx`/`oc`.
+Live Docker checks must only address workspaces created for this project.
