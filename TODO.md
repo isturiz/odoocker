@@ -208,5 +208,6 @@ OpenCode. No migrar ni limpiar automáticamente entornos existentes.
 - [x] Revisar archivos publicables: sin configuración privada de Realista, estado
   generado, credenciales ni rutas de máquina. Añadir exclusiones preventivas al gitignore.
 - [x] Documentar la transición y corregir la limitación obsoleta del cliente PostgreSQL 15.
-- [ ] Publicar y fusionar la sustitución de la plantilla por el motor mediante PR.
+- [x] Publicar la sustitución de la plantilla por el motor mediante
+  [PR #2](https://github.com/isturiz/odoocker/pull/2), conservando el historial.
 - No modificar clones de clientes, servicios en marcha, funciones Fish ni configuración global.
