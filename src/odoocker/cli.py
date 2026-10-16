@@ -79,7 +79,9 @@ def parser():
     code = commands.add_parser("code", help="Open a supported coding assistant")
     assistants = code.add_subparsers(dest="assistant", required=True)
     oc = assistants.add_parser(
-        "opencode", help="Connect the host TUI to this instance's Linux server"
+        "opencode",
+        help="Connect to OpenCode, or update its container to the host version",
+        epilog="Use 'odx code opencode update' to back up and update to the host version.",
     )
     oc.add_argument(
         "--info", action="store_true", help="Check authenticated server API instead of TUI"
@@ -306,6 +308,15 @@ def host(args):
             command.append("--keep")
         return runtime.compose(*command, check=False).returncode
     if args.command == "code":
+        # Reserve only an unescaped exact action; `-- update` still reaches the TUI.
+        if args.args == ["update"]:
+            if args.info:
+                raise OdxError("update cannot be combined with --info")
+            from .adapters.opencode_update import update
+
+            return update(runtime)
+        if args.args[:1] == ["update"]:
+            raise OdxError("Usage: odx code opencode update (no additional arguments)")
         if args.args[:1] == ["--"]:
             args.args = args.args[1:]
         if args.info:

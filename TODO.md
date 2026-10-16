@@ -90,7 +90,7 @@ pruebas unitarias y validaciones reales.
 - [ ] Restauración genérica segura y neutralización por versión.
 - [ ] Adaptador Cloudpepper sin credenciales versionadas.
 - [ ] Adaptar scripts específicos de Realista.
-- [ ] Exportación/respaldo del estado de OpenCode antes de actualizaciones.
+- [x] Respaldo privado del estado de OpenCode antes de actualizaciones explícitas.
 - [ ] Migración voluntaria de Realista con respaldo y vuelta al flujo anterior.
 
 ## Registro de validación real
@@ -211,3 +211,70 @@ OpenCode. No migrar ni limpiar automáticamente entornos existentes.
 - [x] Publicar la sustitución de la plantilla por el motor mediante
   [PR #2](https://github.com/isturiz/odoocker/pull/2), conservando el historial.
 - No modificar clones de clientes, servicios en marcha, funciones Fish ni configuración global.
+
+## Adopción local de la CLI instalada
+
+- [x] Tras autorización del usuario y retirada por él de la restricción en AGENTS.md,
+  instalar `odoocker` con `uv tool install --python 3.12` desde GitHub/main,
+  revisión inicial `2026dd62fa7d6420b0352e6bda879f57fef6d395`.
+- [x] Archivar fuera de autoload las funciones Fish antiguas `odx`, `oc`, `odooctl`
+  y los completions de `odx`/`odooctl`, sin cambiar su contenido; conservar manifiesto
+  de checksums e instrucciones de recuperación en el archivo local.
+- [x] Retirar el alias `odooctl` en vez de redirigirlo silenciosamente a otra CLI;
+  dejar `oc` como wrapper mínimo de `command odx code opencode $argv`.
+- [x] Sustituir completions antiguos por los comandos/opciones del motor nuevo.
+  Mantener `oc2`, `ocweb`, PATH y configuración nativa de OpenCode sin cambios.
+- [x] Validación en Fish nuevo: `odx` resuelve como ejecutable, versión 0.1.0,
+  help correcto, sin alias `odooctl` y sin sugerencias de comandos antiguos.
+- [x] Comprobar sintaxis Fish, checksums de los cinco originales y forwarding de
+  argumentos con espacios/código de salida mediante un ejecutable de prueba aislado.
+- [x] `odx code opencode --info` desde la instalación conecta con la instancia
+  Realista lab existente y verifica OpenCode 2.0.30 sin recrear servicios.
+- [x] Documentar instalación de usuario, convivencia con Fish, actualización y
+  acceso directo opcional `oc` sin rutas específicas de máquina.
+- [x] Crear un workspace desechable usando el binario instalado desde Fish y
+  verificar `fetch --dry-run` sin Docker ni descargas; eliminar solo ese fixture.
+- [x] 386 tests del motor y Ruff lint/formato correctos; `oc --info` también funciona
+  desde Fish dentro del laboratorio existente. README/TODO actualizados sin commit.
+- Las terminales ya abiertas requieren abrir una nueva o descargar las funciones
+  y completions antiguos de su memoria. Los comandos legacy sin equivalente siguen pendientes.
+
+## Actualización explícita de OpenCode
+
+- [x] Añadir `odx code opencode update` para adoptar la versión exacta del host sin
+  actualizar el host ni recuperar el subcomando global `oc update`.
+- [x] Preservar comentarios/configuración TOML; rechazar layouts que no se puedan
+  editar con seguridad y cambios pendientes no relacionados con OpenCode.
+- [x] Bloqueos de workspace/instancia y contenedor de mantenimiento con locks Linux
+  durante todo el proceso; rechazar sesiones activas y operaciones Odoo gestionadas.
+- [x] Detener solo Odoo/OpenCode de la instancia, respaldar los tres volúmenes nativos
+  y configuración anterior con permisos privados y checksum, sin Docker socket ni
+  creación silenciosa de volúmenes ausentes.
+- [x] Regenerar, construir, recrear y verificar versión/API; conservar respaldo y
+  resultado por fases sin downgrade/restauración automática ante fallos.
+- [x] Rechazar downgrades antes de parar servicios (también prereleases); identificar
+  la imagen real del contenedor anterior para reintentos tras un build incompleto.
+- [x] 422 pruebas automatizadas superadas, incluidas transacciones de fallo,
+  conservación de datos/configuración, protocolo de backup y retención real de locks.
+- [x] Validar en el workspace propio `update-smoke` la actualización real 2.0.30 ->
+  2.0.31, API autenticada, conservación de sesión/título y contenido sintético
+  pendiente en inbox (sin invocar proveedores), y marcadores en los tres volúmenes.
+- [x] Comprobar respaldo completo, SHA-256 y permisos 0700/0600; PostgreSQL conserva
+  el mismo ID y no se recrea durante la actualización; guard temporal eliminado.
+- [x] Validar rechazo con lock Odoo ocupado sin parar servicios ni editar manifiesto;
+  fallo de build inyectado conserva backup y deja solo PostgreSQL en marcha, con locks
+  liberados después de parar Odoo/OpenCode. Reintentar con el comando normal funciona.
+- [x] Validar reintento cuando el Compose apunta a una imagen nueva inexistente,
+  usando la imagen real anterior por ID para el contenedor de mantenimiento.
+- [x] Smoke Odoo 19 superado (una prueba, cero errores/fallos, recursos temporales
+  limpiados), wheel construido y help ejecutado desde instalación aislada.
+- [x] Parar el workspace de validación conservando sus volúmenes y respaldos;
+  no actualizar las instancias de Realista ni los sandboxes existentes.
+- [ ] Restauración guiada del respaldo de estado OpenCode tras una actualización fallida.
+- El pin sigue siendo de workspace y la actualización de servicios, por instancia.
+  Los procesos externos y nuevos clientes requieren coordinación humana durante mantenimiento.
+- Distribución: publicar el motor en GitHub/main y renovar la CLI con
+  `uv tool upgrade odoocker`, conservando su origen Git. Verificar el help y la
+  revisión instalada sin ejecutar el updater sobre ningún workspace del usuario.
+- La instalación/actualización de la CLI y la actualización del servidor OpenCode
+  son operaciones independientes; los contenedores solo cambian por petición explícita.

@@ -7,6 +7,7 @@ import secrets
 import shutil
 import subprocess
 import uuid
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -268,9 +269,10 @@ class Runtime:
             },
         }
 
-    def generate(self, *, allow_database_switch=False):
+    def generate(self, *, allow_database_switch=False, operation_locked=False):
         self.workspace.validate_sources()
-        with locked(self.operation_lock):
+        # The updater holds this lock across backup, generation and recreation.
+        with nullcontext() if operation_locked else locked(self.operation_lock):
             previous = self.directory / "context.json"
             if previous.exists():
                 version = json.loads(previous.read_text()).get("version")
@@ -353,25 +355,25 @@ class Runtime:
                     "Workspace or engine configuration changed; run odx configure, then odx up "
                     "before using this instance. No running services were changed."
                 )
-        env = {key: value for key, value in os.environ.items() if not key.startswith("COMPOSE_")}
         return run_command(
-            [
-                "docker",
-                "compose",
-                "--project-directory",
-                str(self.directory),
-                "--env-file",
-                str(self.directory / "compose.env"),
-                "--project-name",
-                self.project,
-                "--file",
-                str(self.compose_file),
-                *args,
-            ],
-            capture=capture,
-            check=check,
-            env=env,
+            self.compose_args(*args), capture=capture, check=check, env=compose_env()
         )
+
+    def compose_args(self, *args, file=None):
+        """Also used for the updater's generated, explicitly scoped maintenance file."""
+        return [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(self.directory),
+            "--env-file",
+            str(self.directory / "compose.env"),
+            "--project-name",
+            self.project,
+            "--file",
+            str(file or self.compose_file),
+            *args,
+        ]
 
     def url(self, service, port):
         result = self.compose("port", service, str(port), capture=True)
@@ -379,3 +381,7 @@ class Runtime:
         if not address.startswith("127.0.0.1:") or not address.removeprefix("127.0.0.1:").isdigit():
             raise OdxError(f"No localhost port for {service}; run odx up first")
         return f"http://{address}"
+
+
+def compose_env():
+    return {key: value for key, value in os.environ.items() if not key.startswith("COMPOSE_")}

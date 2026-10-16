@@ -5,8 +5,6 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 
 ## Safety
 
-- Do not modify existing Realista projects, containers, global Fish functions,
-  global OpenCode configuration or their persistent state.
 - Run Docker commands with an explicit generated Compose file and project ID.
 - Never remove volumes implicitly or mount the Docker socket in agent containers.
 - No production management or automatic migration of existing workspaces.

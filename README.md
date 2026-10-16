@@ -28,7 +28,111 @@ y pgvector se pueden seleccionar por workspace. Cada instancia
 tiene su propio virtualenv Linux. Las versiones de las imágenes base están fijadas
 por etiqueta; el bloqueo por digest y el lock de fuentes/dependencias están pendientes.
 
-## Probar sin sustituir tu `odx` actual
+## Instalar la CLI
+
+```sh
+uv tool install --python 3.12 'git+https://github.com/isturiz/odoocker.git@main'
+odx --version
+odx --help
+```
+
+La instalación es de usuario, independiente del checkout del motor y de los
+workspaces; no exige copiar scripts por cliente ni usar `uv run` a diario. Si el
+directorio de herramientas no está en el PATH, ejecuta `uv tool update-shell` y
+abre una terminal nueva. Instalar la CLI no arranca ni reconstruye contenedores.
+
+Si ya existe una función Fish llamada `odx`, tiene prioridad sobre el ejecutable.
+Archiva deliberadamente el helper anterior y sus completions fuera de las rutas
+autoload antes de adoptar el comando nuevo. `functions --erase odx` solo descarga
+la función de la sesión actual: no retira su archivo. Mientras tanto,
+`command odx` ejecuta el binario sin pasar por la función.
+
+Revisa también aliases como `odooctl` y wrappers como `oc`: los comandos antiguos
+de restauración, contraseñas, `oc sync`/`update`/`pair` no tienen equivalencia
+automática en la CLI nueva. Un acceso directo opcional y sin lógica duplicada es:
+
+```fish
+function oc --wraps 'odx code opencode'
+    command odx code opencode $argv
+end
+```
+
+Para actualizar una instalación que sigue `main`, usa `uv tool upgrade odoocker`.
+Después, aplica los cambios a cada workspace deliberadamente con `down`,
+`configure` y `up` (añade `--code` si utilizas OpenCode), sin operaciones activas.
+Esto conserva los volúmenes, pero no migra datos entre versiones PostgreSQL.
+También puedes instalar una revisión concreta usando `@<commit>` en vez de `@main`.
+
+### Actualizar OpenCode de una instancia
+
+Primero actualiza OpenCode en el host mediante tu método habitual de instalación.
+Después, desde el workspace, sin conversaciones ni operaciones activas:
+
+```sh
+opencode --version
+odx code opencode update
+```
+
+El comando adopta **la versión exacta del host**: no busca `latest`, no actualiza el
+host, no copia su perfil personal y no cambia de proveedor. Requiere una instancia
+ya preparada con sus volúmenes OpenCode existentes. No acepta flags de actualización
+adicionales; `odx code opencode -- update` sigue reenviando `update` al cliente TUI.
+Si el host es anterior al servidor configurado, rechaza el downgrade antes de parar
+servicios; incluye la precedencia de versiones prerelease en esta comprobación.
+
+El flujo valida el manifiesto, rechaza cambios ajenos pendientes y comprueba sesiones
+OpenCode activas en primer plano mediante su API. Un contenedor de mantenimiento mantiene
+bloqueados `run`, tests y `deps` durante toda la actualización. Se detienen Odoo y
+OpenCode de la instancia (comparten imagen), pero no PostgreSQL ni otras instancias.
+Con OpenCode detenido, se respaldan sus volúmenes de configuración, datos y estado;
+solo después se cambia `[opencode].version`, se reconstruye, se recrean los dos
+servicios y se comprueban la versión y la API autenticada. No se ejecuta `odx run`.
+
+Los respaldos permanecen en:
+
+```text
+.odoocker/instances/<instancia>/opencode-updates/<id>/
+  opencode-state.tar.gz
+  odoocker.toml
+  compose.json
+  context.json
+  odoo.conf
+  secrets.json
+  result.json
+```
+
+Incluyen datos sensibles (sesiones, credenciales y configuración). El directorio
+es privado y `.odoocker/` debe seguir excluido de Git; no publiques estos archivos.
+`result.json` conserva la fase, el resultado, la imagen anterior y el SHA-256 del
+archivo cuando el backup terminó. Se conservan también `compose.env` y el Compose
+del contenedor de mantenimiento para diagnóstico. No se eliminan backups automáticamente.
+
+Si falla, se informa la fase y la ruta de recuperación. Si ya había empezado la
+parada, se intenta dejar Odoo/OpenCode detenidos **antes** de liberar los bloqueos.
+No se intenta un downgrade ni restaurar datos automáticamente: una versión nueva
+puede haber migrado el estado. El manifiesto puede quedar en la versión nueva si
+se llegó a esa fase; el anterior se conserva en el respaldo. Recuperar exige parar
+la instancia y restaurar un conjunto coherente de los tres volúmenes, configuración
+generada y versión anterior; no arranques una imagen antigua sobre estado migrado.
+La restauración automática del estado OpenCode no está implementada.
+Los respaldos reflejan el inicio de cada intento, no necesariamente el último
+estado funcional: conserva especialmente el primer respaldo de un cambio de versión.
+Para reintentar una construcción fallida se utiliza la imagen real del contenedor
+anterior por ID, aunque el Compose generado ya apunte a una imagen nueva inexistente.
+
+Los bloqueos cubren operaciones `odx`, no procesos arbitrarios de un agente ni
+comandos Docker externos. Cierra los clientes y evita nuevas conversaciones durante
+el mantenimiento; las comprobaciones de sesiones no son una barrera transaccional
+frente a otros clientes. SIGKILL o una caída de Docker pueden requerir diagnóstico
+manual del contenedor de mantenimiento antes de reintentar.
+
+Para otra instancia, usa `odx --instance <nombre> code opencode update`. El pin es
+compartido por el workspace: solo se recrea la instancia seleccionada; las demás
+deben actualizarse explícitamente antes de volver a conectar con el host nuevo.
+Incluso con la misma versión, el comando respalda y reconstruye para poder aplicar
+una nueva versión del motor o reintentar una actualización fallida.
+
+## Probar desde el checkout sin sustituir tu `odx` actual
 
 Desde este repositorio:
 
@@ -62,8 +166,8 @@ Desde el workspace, también se puede invocar el motor sin instalarlo globalment
 uv run --project /ruta/al/odoocker odx status
 ```
 
-No ejecutar `uv tool install` ni reemplazar `odx.fish`/`oc.fish` para probar este
-prototipo. Si más adelante se desea, `oc` puede ser un alias de `odx code opencode`.
+No es necesario instalar la herramienta ni reemplazar `odx.fish`/`oc.fish` solo
+para probar el checkout. El flujo con `uv run` sigue siendo útil al desarrollar el motor.
 
 ### Reutilizar fuentes locales sin modificarlas
 
