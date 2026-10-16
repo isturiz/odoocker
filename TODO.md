@@ -326,3 +326,28 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   tests, Ruff lint, and Git whitespace checks passed. No remaining Spanish detected
   in tracked files.
 - Documentation-only delivery; no new live Docker validation is required or claimed.
+
+## One-off client restore validation
+
+- [x] Restore a trusted client ZIP into an isolated PostgreSQL 18 staging database
+  and filestore without changing the original archive. This uses private operation
+  scripts, not a new installed `odx` command or shared-engine restore implementation.
+- [x] Diagnose ten missing columns across five installed modules; upgrade those
+  selected modules and Odoo's dependent modules in a second DB/filestore copy,
+  retaining the first restored copy. Do not use `-u all` or change addon branches.
+- [x] Repeat native module neutralization, regenerate copy identifiers and local
+  administrator access, and verify 136,230 referenced attachment sizes/checksums.
+  Publish `dev` only after schema, module state, and neutralization checks pass.
+- [x] Fix a locally checked-out `mcp_server` hook to find inactive cleanup crons
+  instead of duplicating them on startup. Its regression fails before the fix and
+  all three targeted tests pass afterward; all 23 selected logging/cron tests pass
+  in fresh, managed test databases, with automatic DB/filestore cleanup.
+- [x] Live login page and authenticated web client return HTTP 200. After the
+  normal server starts, confirm zero active crons, real outgoing mail servers,
+  incoming mail servers, and pending module operations. Preserve private access
+  details, logs, and recovery copies; do not publish client secrets or backup data.
+- The addon fix is local and uncommitted. This validation is not a full client
+  functional, browser, PDF, or external integration review, nor anonymization.
+- [ ] Integrate a safe generic restore workflow separately, with explicit role/ACL
+  policy, resumability, recovery checkpoints, and per-version neutralization. The
+  one-off text-based role inventory is not a complete SQL parser or a public API.
