@@ -386,6 +386,11 @@ Defaults are conservative:
   neither accepts `all`, installs arbitrary modules or permits a selected downgrade.
   Odoo may also update/install required dependencies according to its native rules.
 
+Database-imported data modules are preserved without requiring local Python
+manifests. They are not candidates for source-code updates; an explicit request
+to update one is rejected. Registry validation respects Odoo's native loadable-module
+domain instead of assuming every installed module must be loaded from disk.
+
 For example, explicitly replace `dev`, resolve missing roles, update outdated
 installed addons and set the weak local administrator password:
 

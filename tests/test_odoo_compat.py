@@ -11,6 +11,7 @@ from odoocker.errors import OdxError
 from odoocker.odoo_compat import (
     check_python_minimum,
     configure,
+    loadable_module_names,
     registration_boundary,
     without_demo_argument,
 )
@@ -81,6 +82,24 @@ def test_unknown_demo_semantics_fail_instead_of_guessing(option):
     config = SimpleNamespace(parser=SimpleNamespace(get_option=lambda name: option))
     with pytest.raises(OdxError, match="refusing to guess"):
         without_demo_argument(config)
+
+
+def test_module_validation_respects_native_loadable_domain_overrides():
+    domain = [("state", "=", "installed"), ("imported", "=", False)]
+    searched = []
+
+    def search(value):
+        searched.append(value)
+        return SimpleNamespace(mapped=lambda field: ["python_fixture"])
+
+    module = SimpleNamespace(_get_modules_to_load_domain=lambda: domain, search=search)
+    assert loadable_module_names(module) == ["python_fixture"]
+    assert searched == [domain]
+
+
+def test_unknown_module_domain_is_not_replaced_with_a_guessed_filter():
+    with pytest.raises(OdxError, match="loadable-module domain"):
+        loadable_module_names(SimpleNamespace())
 
 
 def loading_with_different_layout(other_environment):

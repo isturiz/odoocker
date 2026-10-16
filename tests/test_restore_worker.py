@@ -1,12 +1,14 @@
 """Restore ordering, recovery identities and explicit options using a fake Odoo backend."""
 
 import json
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
 from odoocker.errors import OdxError
 from odoocker.restore import worker
-from odoocker.restore.odoo import choose_updates
+from odoocker.restore.odoo import Backend, choose_updates
 
 
 def compare(a, b):
@@ -30,6 +32,71 @@ def test_update_selection_is_explicit_and_includes_same_version_schema_owners():
     )
     with pytest.raises(OdxError, match="downgrade"):
         choose_updates(installed, manifests, gaps, explicit=["ahead"], compare=compare)
+
+
+def test_database_imported_modules_are_preserved_without_local_manifests():
+    installed = {"regular": "19.0.1", "database_only_fixture": "19.0.99"}
+    manifests = {"regular": {"version": "19.0.2"}}
+
+    assert choose_updates(
+        installed,
+        manifests,
+        [],
+        outdated=True,
+        imported={"database_only_fixture"},
+        compare=compare,
+    ) == (["regular"], [])
+
+
+def test_imported_module_cannot_be_explicitly_updated_as_python_code():
+    with pytest.raises(OdxError, match="Database-imported"):
+        choose_updates(
+            {"data_fixture": "19.0.1"},
+            {},
+            [],
+            explicit=["data_fixture"],
+            imported={"data_fixture"},
+            compare=compare,
+        )
+
+
+def test_unavailable_python_addons_are_not_treated_as_imported_data():
+    with pytest.raises(OdxError, match="unavailable"):
+        choose_updates({"missing_python": "19.0.1"}, {}, [], outdated=True, compare=compare)
+
+
+def test_missing_columns_owned_only_by_imported_data_require_review():
+    with pytest.raises(OdxError, match="no installed owner"):
+        choose_updates(
+            {"data_fixture": "19.0.1"},
+            {},
+            [{"modules": ["data_fixture"]}],
+            outdated=True,
+            imported={"data_fixture"},
+            compare=compare,
+        )
+
+
+@pytest.mark.parametrize("has_column", [False, True])
+def test_imported_module_metadata_uses_column_capability_not_release_number(has_column):
+    backend = object.__new__(Backend)
+    queries = []
+    cursor = SimpleNamespace(
+        execute=lambda query: queries.append(query),
+        fetchone=lambda: (1,) if has_column else None,
+        fetchall=lambda: [("data_fixture",)],
+    )
+
+    @contextmanager
+    def connection(name):
+        assert name == "restored_fixture"
+        yield cursor
+
+    backend.cursor = connection
+    assert backend.imported_modules("restored_fixture") == (
+        {"data_fixture"} if has_column else set()
+    )
+    assert len(queries) == (2 if has_column else 1)
 
 
 @pytest.mark.parametrize("explicit", [["all"], ["uninstalled"]])

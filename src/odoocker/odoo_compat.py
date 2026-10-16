@@ -43,6 +43,13 @@ def without_demo_argument(config):
     raise OdxError("Odoo has no recognized --without-demo capability; refusing to guess")
 
 
+def loadable_module_names(module):
+    domain = getattr(module, "_get_modules_to_load_domain", None)
+    if not callable(domain):
+        raise OdxError("Odoo has no recognized loadable-module domain capability")
+    return module.search(domain()).mapped("name")
+
+
 def registration_boundary(load_modules):
     """Locate the model-hook loop structurally, regardless of layout or variable names.
 

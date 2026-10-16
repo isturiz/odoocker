@@ -12,6 +12,7 @@ from ..errors import OdxError
 from ..odoo_compat import (
     check_python_minimum,
     configure,
+    loadable_module_names,
     registration_boundary,
     without_demo_argument,
 )
@@ -65,15 +66,24 @@ def missing_columns(registry, columns):
     return result
 
 
-def choose_updates(installed, manifests, gaps, *, outdated=False, explicit=(), compare):
+def choose_updates(
+    installed, manifests, gaps, *, outdated=False, explicit=(), imported=(), compare
+):
     selected = set(explicit)
+    imported = set(imported)
     if "all" in selected or selected - installed.keys():
         raise OdxError("Only explicitly installed technical modules can be updated; not 'all'")
-    unavailable = sorted(name for name in installed if not manifests.get(name))
+    if selected & imported:
+        raise OdxError("Database-imported data modules cannot be updated from local Python sources")
+    unavailable = sorted(
+        name for name in installed if name not in imported and not manifests.get(name)
+    )
     if unavailable:
         raise OdxError("Installed addons are unavailable locally; see private diagnosis")
     older = set()
     for name, version in installed.items():
+        if name in imported:
+            continue
         local = manifests[name]["version"]
         order = compare(local, version)
         if order < 0:
@@ -82,7 +92,7 @@ def choose_updates(installed, manifests, gaps, *, outdated=False, explicit=(), c
             selected.add(name)
     if outdated:
         for gap in gaps:
-            owners = set(gap["modules"]) & installed.keys()
+            owners = (set(gap["modules"]) & installed.keys()) - imported
             if not owners:
                 raise OdxError("Missing field has no installed owner; specify modules after review")
             selected.update(owners)
@@ -302,6 +312,18 @@ class Backend:
                     "WHERE state='webhook'"
                 )
 
+    def imported_modules(self, name):
+        """Use native DB metadata, not special names, for database-only data modules."""
+        with self.cursor(name) as cursor:
+            cursor.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema='public' "
+                "AND table_name='ir_module_module' AND column_name='imported'"
+            )
+            if not cursor.fetchone():
+                return set()
+            cursor.execute("SELECT name FROM ir_module_module WHERE imported AND state='installed'")
+            return {row[0] for row in cursor.fetchall()}
+
     @staticmethod
     def columns(cursor):
         cursor.execute(
@@ -348,9 +370,13 @@ class Backend:
         from odoo.tools.parse_version import parse_version
 
         installed = self.installed(name)
-        manifests = {module: self.manifest(module) for module in installed}
+        imported = self.imported_modules(name)
+        manifests = {
+            module: self.manifest(module) for module in installed if module not in imported
+        }
         self.record["diagnosis"] = {
             "missing_columns": gaps,
+            "imported_data_modules": sorted(imported),
             "unavailable_modules": sorted(k for k, value in manifests.items() if not value),
         }
         self.save()
@@ -360,6 +386,7 @@ class Backend:
             gaps,
             outdated=options["update_outdated"],
             explicit=options["update"],
+            imported=imported,
             compare=lambda a, b: (
                 (parse_version(a) > parse_version(b)) - (parse_version(a) < parse_version(b))
             ),
@@ -399,7 +426,7 @@ class Backend:
                 if missing_columns(registry, self.columns(cursor)):
                     raise OdxError("Schema still differs from local code")
                 module = env["ir.module.module"]
-                required = module.search([("state", "=", "installed")]).mapped("name")
+                required = loadable_module_names(module)
                 if set(required) - registry._init_modules:
                     raise OdxError("Some installed modules were not loaded")
                 parameters = env["ir.config_parameter"]
