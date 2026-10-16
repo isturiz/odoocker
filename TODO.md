@@ -1,318 +1,328 @@
-# Odoocker — plan y seguimiento
+# Odoocker — plan and progress
 
-Fuente de seguimiento del proyecto. Trasladado desde el plan de la conversación;
-actualizar aquí las decisiones y resultados. No confundir código implementado,
-pruebas unitarias y validaciones reales.
+Project tracking source. Moved from the conversation plan;
+update decisions and results here. Keep implemented code, unit tests,
+and live validation distinct.
 
-## Objetivo y decisiones
+## Goal and decisions
 
-- Motor compartido y versionado; clientes declarativos, no plantillas copiadas.
-- Desarrollo local macOS/Linux, principalmente personal; sin producción.
-- `odoocker` es el proyecto, `odx` la CLI, `odx code opencode` el único asistente
-  soportado. `oc` puede ser un alias opcional, nunca lógica duplicada.
-- Separar adaptador OpenCode del núcleo; no implementar Claude/Codex ni un
-  framework de plugins por adelantado.
-- OpenCode conserva sesiones, agentes y worktrees nativos. Odoocker gestiona
-  servicios y recursos Odoo, no otro gestor Git.
-- No modificar Realista, helpers globales, configuración personal ni sus datos.
-- Nunca compartir estado mutable entre clientes ni borrar volúmenes implícitamente.
-- No montar Docker socket, SSH ni todo el perfil personal en agentes por defecto.
-- Cloudpepper y lógica Realista serán adaptadores posteriores.
+- Shared, versioned engine; declarative clients, not copied templates.
+- Local macOS/Linux development, mainly for personal use; no production.
+- `odoocker` is the project, `odx` the CLI, and `odx code opencode` the only
+  supported assistant. `oc` can be an optional alias, never duplicated logic.
+- Separate the OpenCode adapter from the core; do not implement Claude/Codex or
+  a plugin framework ahead of actual needs.
+- OpenCode retains native sessions, agents, and worktrees. Odoocker manages
+  Odoo services and resources; it is not another Git manager.
+- Do not modify Realista, global helpers, personal configuration, or their data.
+- Never share mutable state between clients or delete volumes implicitly.
+- Do not mount the Docker socket, SSH, or the entire personal profile in agents by default.
+- Cloudpepper and Realista-specific logic will be added as later adapters.
 
-## 0. Proyecto independiente
+## 0. Standalone project
 
-- [x] Revisar destino e instrucciones; crear repositorio nuevo sin commits.
-- [x] Paquete Python 3.12 con CLI `odx`, uv y lock del entorno del motor.
-- [x] Crear `AGENTS.md`, README y este TODO dentro del proyecto.
-- [x] Invocación local sin reemplazar `odx`/`oc` globales.
+- [x] Review the destination and instructions; create a new repository without commits.
+- [x] Python 3.12 package with the `odx` CLI, uv, and an engine environment lock.
+- [x] Create `AGENTS.md`, README, and this TODO within the project.
+- [x] Local invocation without replacing global `odx`/`oc` commands.
 
-## 1. Núcleo multiversión
+## 1. Multi-version core
 
-- [x] Manifiesto validado, ajustes privados y archivos generados separados.
-- [x] Identidad UUID estable por workspace, instancias explícitas y rutas deterministas.
-- [x] Compose/Odoo generados, secretos privados y puertos localhost dinámicos.
-- [x] PostgreSQL no publicado; sin `container_name` ni recursos globales fijos.
-- [x] Revisar fuentes: Python 3.12 y PostgreSQL 16 compatibles con Odoo 17/19.
+- [x] Separate validated manifest, private settings, and generated files.
+- [x] Stable workspace UUID identity, explicit instances, and deterministic paths.
+- [x] Generated Compose/Odoo configuration, private secrets, and dynamic localhost ports.
+- [x] No published PostgreSQL port, `container_name`, or fixed global resources.
+- [x] Review sources: Python 3.12 and PostgreSQL 16 are compatible with Odoo 17/19.
 - [x] `init`, `fetch`, `configure`, `up`, `down`, `status`, `doctor`, `deps`, `run`.
-- [x] `fetch` conserva checkouts existentes; core montado solo lectura.
-- [x] Addons locales editables y requirements por repositorio/módulo.
-- [x] Pruebas unitarias de aislamiento, rutas, errores, identidades y secretos.
-- [x] Crear sandboxes 17 y 19 separados, reutilizando únicamente fuentes core de solo lectura.
-- [x] Validar instalación y arranque real de ambas versiones simultáneamente.
-- [x] Rechazar configuración generada obsoleta y reutilización de instancia entre versiones.
-- [ ] Incluir wkhtmltopdf parcheado, rtlcss y perfil opcional para navegador/tours.
-- [x] Alinear cliente PostgreSQL con servidor (perfiles 16/18, paquetes oficiales PGDG).
-- [ ] Parametrizar UID/GID y validar montajes editables en un host Linux real.
+- [x] `fetch` preserves existing checkouts; core is mounted read-only.
+- [x] Editable local addons and per-repository/module requirements.
+- [x] Unit tests for isolation, paths, errors, identities, and secrets.
+- [x] Create separate 17 and 19 sandboxes, reusing only read-only core sources.
+- [x] Validate live installation and startup of both versions simultaneously.
+- [x] Reject stale generated configuration and instance reuse across versions.
+- [ ] Include patched wkhtmltopdf, rtlcss, and an optional browser/tour profile.
+- [x] Match the PostgreSQL client to the server (16/18 profiles, official PGDG packages).
+- [ ] Make UID/GID configurable and validate editable mounts on a real Linux host.
 
 ## 2. OpenCode
 
-- [x] Adaptador concreto y comando `odx code opencode`; sin otros asistentes.
-- [x] Binario Linux fijado a versión exacta, cliente host y servidor separados.
-- [x] Autenticación propia; configuración/datos/estado persistentes por instancia.
-- [x] Estado TUI del cliente separado por instancia sin tocar su configuración global.
-- [x] Agentes pueden ejecutar `odx status`, `deps`, `run`, `test` sin Docker socket.
-- [x] Validar conexión real autenticada con `odx code opencode --info` en ambos sandboxes.
-- [x] Verificar que la API rechaza peticiones sin autenticación con HTTP 401.
-- [ ] Validar conversación interactiva y autenticación del proveedor en el nuevo servidor.
-- [ ] Verificar persistencia de conversaciones tras recrear/reconstruir.
-- [x] Verificar persistencia de una sesión vacía tras `down`/`up`; conversación con proveedor pendiente.
-- [ ] Validar rutas y metadatos de worktrees nativos desde host y contenedor.
-- [ ] Asociar recursos a checkouts de addons existentes sin gestionar su ciclo Git.
-- [ ] Exportación explícita y limitada de configuración global, sin copiar secretos.
-- [ ] Evaluar inicio automático seguro del servidor desde `code` tras validar el flujo básico.
+- [x] Concrete adapter and `odx code opencode` command; no other assistants.
+- [x] Linux binary pinned to an exact version, with separate host client and server.
+- [x] Dedicated authentication; persistent configuration/data/state per instance.
+- [x] Separate client TUI state per instance without touching its global configuration.
+- [x] Agents can run `odx status`, `deps`, `run`, and `test` without the Docker socket.
+- [x] Validate a live authenticated connection with `odx code opencode --info` in both sandboxes.
+- [x] Verify that the API rejects unauthenticated requests with HTTP 401.
+- [ ] Validate interactive conversations and provider authentication on the new server.
+- [ ] Verify conversation persistence after recreation/rebuilding.
+- [x] Verify empty session persistence after `down`/`up`; provider conversation still pending.
+- [ ] Validate native worktree paths and metadata from the host and container.
+- [ ] Associate resources with existing addons checkouts without managing their Git lifecycle.
+- [ ] Explicit, limited export of global configuration without copying secrets.
+- [ ] Evaluate safe automatic server startup from `code` after validating the basic workflow.
 
-## 3. Pruebas y agentes simultáneos
+## 3. Tests and concurrent agents
 
-- [x] `odx test`: DB, filestore y datos por UUID; nunca usa `dev` como destino.
-- [x] Contenedor temporal sin puertos publicados desde host; puerto coordinado dentro del agente.
-- [x] Bloqueo compartido/exclusivo del entorno y exclusivo de la DB habitual.
-- [x] Logs y resultado JSON por ejecución; `--keep` para diagnóstico.
-- [x] Rechazar como éxito una selección vacía de tests.
-- [x] Limpieza limitada al namespace generado; preservar artefactos y reportar errores.
-- [x] Validar smoke tests reales acotados de Odoo 17 y 19.
-- [x] Validar dos tests simultáneos dentro de OpenCode y conservación de la DB habitual.
-- [x] Validar SIGINT, selección vacía y bloqueo de `deps` con Odoo activo en contenedores reales.
-- [ ] Manejar SIGTERM y recuperación explícita de recursos abandonados tras paradas forzadas.
-- [ ] Añadir descubrimiento de ejecuciones activas y bloquear `down` durante operaciones gestionadas.
+- [x] `odx test`: database, filestore, and data per UUID; never targets `dev`.
+- [x] Temporary container with no published ports from the host; coordinated port inside the agent.
+- [x] Shared/exclusive environment lock and exclusive regular database lock.
+- [x] Logs and JSON result per run; `--keep` for diagnostics.
+- [x] Reject an empty test selection as a success.
+- [x] Cleanup limited to the generated namespace; preserve artifacts and report errors.
+- [x] Validate limited live smoke tests for Odoo 17 and 19.
+- [x] Validate two concurrent tests inside OpenCode and preservation of the regular database.
+- [x] Validate SIGINT, empty selection, and `deps` locking with Odoo active in real containers.
+- [ ] Handle SIGTERM and explicit recovery of abandoned resources after forced shutdowns.
+- [ ] Add active run discovery and block `down` during managed operations.
 
-## 4. Reproducibilidad
+## 4. Reproducibility
 
-- [ ] Lock de revisiones Git, imágenes por digest y dependencias Linux por perfil/plataforma.
-- [ ] Separar `sync` (materializar lock) y `update` (actualizar deliberadamente).
-- [x] Gestión declarativa de repositorios addons, sin cambiar ramas/descartar trabajo editable.
-- [x] Requirements adicionales del workspace con restricciones Odoo y fingerprint directo.
-- [ ] Fingerprint recursivo de includes `-r`/`-c`.
-- [ ] Validar reconstrucción desde máquina/workspace limpio.
-- [ ] Versionado de esquema y migración explícita de estado/rutas, sin reasociar datos a ciegas.
+- [ ] Lock Git revisions, image digests, and Linux dependencies per profile/platform.
+- [ ] Separate `sync` (materialize the lock) from `update` (update deliberately).
+- [x] Declarative addons repository management without switching branches/discarding editable work.
+- [x] Additional workspace requirements with Odoo constraints and a direct fingerprint.
+- [ ] Recursive fingerprinting of `-r`/`-c` includes.
+- [ ] Validate rebuilding from a clean machine/workspace.
+- [ ] Schema versioning and explicit state/path migration without blindly reassociating data.
 
-## 5. Adaptadores y adopción
+## 5. Adapters and adoption
 
-- [ ] Restauración genérica segura y neutralización por versión.
-- [ ] Adaptador Cloudpepper sin credenciales versionadas.
-- [ ] Adaptar scripts específicos de Realista.
-- [x] Respaldo privado del estado de OpenCode antes de actualizaciones explícitas.
-- [ ] Migración voluntaria de Realista con respaldo y vuelta al flujo anterior.
+- [ ] Safe generic restore and per-version neutralization.
+- [ ] Cloudpepper adapter without version-controlled credentials.
+- [ ] Adapt Realista-specific scripts.
+- [x] Private OpenCode state backup before explicit updates.
+- [ ] Opt-in Realista migration with backup and a return path to the previous workflow.
 
-## Registro de validación real
+## Live validation log
 
-- Entorno de prueba: macOS arm64, Docker Desktop; Realista 17/19 ya activos.
-- Verificado perfil en fuentes locales Odoo 17 y 19; no equivale a tests ejecutados.
-- Primera imagen Linux y servicios sandbox-19 construidos/arrancados correctamente.
-- Instalación conjunta de requirements y `uv pip check` correcta: 65 paquetes en
-  Odoo 17 y 66 en Odoo 19, en volúmenes Linux separados.
-- Inicialización de `base` y `/web/login` con HTTP 200 en Odoo 17 y 19 a la vez;
-  procesos HTTP de smoke detenidos al terminar, servicios de desarrollo conservados.
-- Servidores OpenCode 2.0.30 simultáneos, puertos dinámicos distintos y API autenticada
-  verificada en ambos. Petición sin contraseña rechazada con 401.
-- Smoke `/base:TestACL.test_field_visibility_restriction` superado en ambas versiones:
-  una prueba por ejecución, código 0 y limpieza de DB/filestore confirmada.
-- Dos ejecuciones de ese smoke en paralelo dentro del mismo contenedor OpenCode 19:
-  ambas correctas, IDs/bases distintos, sin bases de test sobrantes y sin cambios
-  en el recuento/hash de logins de la base `dev`.
-- Selección de clase inexistente devuelve código 1, cero tests y limpia sus recursos.
-- SIGINT durante inicialización de una DB de test termina el hijo Odoo, conserva
-  resultado/log y elimina DB/filestore de la ejecución.
-- `deps` rechazado por bloqueo mientras `odx run` usa el entorno, sin mutar paquetes.
-- Wheel construido e invocado desde un entorno uv aislado, sin instalación global.
-- 317 pruebas unitarias superadas; Ruff lint/formato correctos. Wheel incluye los
-  recursos Docker y se ha reconstruido con la versión final del motor.
-- Repetido smoke en paralelo entre Odoo 17 y 19 tras reconstruir la imagen final:
-  ambas ejecuciones correctas y sin datos de tests sobrantes.
-- `down`/`up` del sandbox 17 conserva sus siete volúmenes, base `dev` y una sesión
-  vacía creada para la prueba; la sesión temporal se elimina después. El contenedor
-  OpenCode del sandbox 19 permanece intacto durante esta comprobación.
-- No equivalen a una suite completa: PDF, tours y conversación con proveedor siguen pendientes.
+- Test environment: macOS arm64, Docker Desktop; Realista 17/19 already running.
+- Profile verified against local Odoo 17 and 19 sources; this does not mean tests were run.
+- First Linux image and sandbox-19 services built/started successfully.
+- Combined requirements installation and `uv pip check` successful: 65 packages
+  in Odoo 17 and 66 in Odoo 19, in separate Linux volumes.
+- `base` initialized and `/web/login` returned HTTP 200 in Odoo 17 and 19 simultaneously;
+  smoke HTTP processes stopped afterward, development services preserved.
+- Concurrent OpenCode 2.0.30 servers with distinct dynamic ports and authenticated
+  API verified on both. Requests without a password rejected with 401.
+- `/base:TestACL.test_field_visibility_restriction` smoke passed on both versions:
+  one test per run, exit code 0, and database/filestore cleanup confirmed.
+- Two parallel runs of that smoke inside the same OpenCode 19 container:
+  both successful, distinct IDs/databases, no leftover test databases, and no changes
+  to the login count/hash in the `dev` database.
+- Selecting a nonexistent class returns exit code 1, zero tests, and cleans up its resources.
+- SIGINT during test database initialization terminates the Odoo child, preserves
+  the result/log, and deletes the run's database/filestore.
+- `deps` rejected by a lock while `odx run` uses the environment, without mutating packages.
+- Wheel built and invoked from an isolated uv environment without global installation.
+- 317 unit tests passed; Ruff lint/format checks passed. The wheel includes Docker
+  resources and was rebuilt with the final engine version.
+- Parallel smoke repeated across Odoo 17 and 19 after rebuilding the final image:
+  both runs successful with no leftover test data.
+- Sandbox 17 `down`/`up` preserves its seven volumes, `dev` database, and an empty
+  session created for the test; the temporary session is deleted afterward.
+  The sandbox 19 OpenCode container remains untouched during this check.
+- These do not replace a full suite: PDF, tours, and provider conversations remain pending.
 
-### Entrega: configuración declarativa de Realista lab
+### Delivery: declarative Realista lab configuration
 
-- [x] Preparar el workspace `realista-lab` existente, sin reinicializarlo.
-- [x] Trasladar los 21 repositorios a `[[addons]]` en `odoocker.toml`, conservando
-  URLs, ramas, nombres de checkout y prioridad del addons_path original.
-- [x] Trasladar 44 dependencias adicionales del pyproject a requirements del workspace
-  (solo se elimina la entrada duplicada de openupgradelib).
-- [x] Configurar los límites de desarrollo originales sin copiar contraseñas,
-  configuración de producción/MCP ni referencias a bases de Realista existentes.
-- [x] Añadir `fetch --dry-run` y clonado seguro de repositorios declarados al motor.
-- [x] Validar clonado/reintentos con repositorios Git temporales locales, conservación
-  de ramas de trabajo y cambios sucios, orígenes erróneos, destinos inseguros y limpieza.
-- [x] Comparar el manifiesto y requirements preparados con el proyecto original,
-  y ejecutar dry-run desde el nuevo workspace sin red ni estado generado.
-- [x] 364 pruebas automatizadas superadas, Ruff lint/formato correctos y wheel
-  construido/comprobado en un entorno aislado. No se ha validado esta entrega con Docker.
-- [ ] Descargar los repositorios privados y validar autenticación/ramas reales.
-- [ ] Resolver/instalar todas las dependencias Realista y validar sus módulos en Linux.
-- No se han clonado los 21 repositorios, instalado dependencias ni arrancado
-  contenedores de Realista lab en esta entrega. Los sandboxes existentes no se recrean.
+- [x] Prepare the existing `realista-lab` workspace without reinitializing it.
+- [x] Move all 21 repositories to `[[addons]]` in `odoocker.toml`, preserving
+  URLs, branches, checkout names, and the original addons_path priority.
+- [x] Move 44 additional dependencies from pyproject to workspace requirements
+  (only the duplicate openupgradelib entry is removed).
+- [x] Configure the original development limits without copying passwords,
+  production/MCP configuration, or references to existing Realista databases.
+- [x] Add `fetch --dry-run` and safe cloning of declared repositories to the engine.
+- [x] Validate cloning/retries with temporary local Git repositories, preservation
+  of working branches and uncommitted changes, wrong origins, unsafe destinations, and cleanup.
+- [x] Compare the prepared manifest and requirements with the original project,
+  and run a dry-run from the new workspace without networking or generated state.
+- [x] 364 automated tests passed, Ruff lint/format checks passed, and wheel
+  built/checked in an isolated environment. This delivery was not validated with Docker.
+- [ ] Download private repositories and validate actual authentication/branches.
+- [ ] Resolve/install all Realista dependencies and validate its modules on Linux.
+- The 21 repositories were not cloned, dependencies were not installed, and Realista
+  lab containers were not started in this delivery. Existing sandboxes are not recreated.
 
-### Corrección: conflicto Requests en Realista lab
+### Fix: Requests conflict in Realista lab
 
-- [x] Identificar los requisitos incompatibles: core y workspace con 2.31.0 frente
-  al pin 2.32.4 del clon de addons Realista.
-- [x] Ajustar únicamente el clon del laboratorio a `requests>=2.31.0,<3` y dejar
-  la versión del workspace a cargo de las restricciones del core.
-- [x] Resolver en seco el conjunto completo en el contenedor Linux: 229 paquetes
-  compatibles, seleccionando Requests 2.31.0. Sin overrides ni cambios en Odoo/original.
-- [x] Verificar instalación real en el contenedor del laboratorio: 229 paquetes,
-  `uv pip check` correcto y Requests 2.31.0 bajo Python 3.12.13.
-- [x] Smoke de Odoo 19 `/base:TestACL.test_field_visibility_restriction` superado
-  con una prueba, código 0 y eliminación de la base/filestore temporales.
-- Este cambio de metadatos no demuestra compatibilidad de todas las integraciones
-  ni subsana las vulnerabilidades de una versión antigua fijada por el core.
+- [x] Identify incompatible requirements: core and workspace require 2.31.0 versus
+  the Realista addons clone's 2.32.4 pin.
+- [x] Adjust only the lab clone to `requests>=2.31.0,<3` and leave
+  the workspace version under the core constraints' control.
+- [x] Dry-run resolution of the full set in the Linux container: 229 compatible
+  packages, selecting Requests 2.31.0. No overrides or changes to Odoo/the original project.
+- [x] Verify live installation in the lab container: 229 packages,
+  successful `uv pip check`, and Requests 2.31.0 under Python 3.12.13.
+- [x] Odoo 19 `/base:TestACL.test_field_visibility_restriction` smoke passed
+  with one test, exit code 0, and temporary database/filestore deletion.
+- This metadata change does not demonstrate compatibility of all integrations
+  or fix vulnerabilities in an old version pinned by core.
 
-### Entrega: PostgreSQL 18 y pgvector
+### Delivery: PostgreSQL 18 and pgvector
 
-- [x] Añadir `[postgres]` con versión principal 16/18 y pgvector opcional, manteniendo
-  PostgreSQL 16 y sus volúmenes para los manifiestos existentes sin esa sección.
-- [x] Separar el volumen PG18 (`db-data-pg18`) del histórico PG16 (`db-data`), con
-  montaje `/var/lib/postgresql` para el layout de PG18 y sin migración/borrado implícitos.
-- [x] Exigir consentimiento `configure --allow-database-switch` al cambiar de major,
-  y rechazar el cambio explícito mientras los servicios estén en marcha.
-- [x] Instalar cliente de la misma major desde PGDG firmado y separar imágenes
-  Odoo/OpenCode por versión PostgreSQL.
-- [x] Configurar Realista lab para PostgreSQL 18 y pgvector 0.8.7 con base nueva,
-  según autorización; conservar el volumen PG16, filestore y estado OpenCode existentes.
-- [x] 386 pruebas automatizadas superadas y Ruff correcto.
-- [x] Validación real en Realista lab (macOS arm64/Docker Desktop): servidor y
-  clientes `psql`/`pg_dump`/`pg_restore` 18.6, pgvector 0.8.7 y directorio
-  `/var/lib/postgresql/18/docker` sobre el nuevo volumen.
-- [x] Crear extensión y consultar vectores en una base temporal; dump custom con
-  cliente del contenedor Odoo y restore en otra base conservan extensión y filas.
-  Ambas bases y el dump temporal se eliminan al finalizar.
-- [x] Inicializar `dev` con Odoo 19, habilitar `vector` en ella y verificar su UUID,
-  extensión y datos vectoriales de prueba tras `down`/`up --code --no-build`.
-  La base temporal de persistencia se elimina, `dev` se conserva.
-- [x] Leer `PG_VERSION = 16` en el volumen anterior mediante montaje solo lectura;
-  no se borra ni se monta como datos del servidor 18.
-- [x] HTTP 200 en `/web/login`, smoke `/base:TestACL.test_field_visibility_restriction`
-  correcto (una prueba, cero errores/fallos, DB y filestore de test eliminados).
-- [x] Wheel construido; servicios Odoo/OpenCode del laboratorio quedan preparados,
-  sin dejar el proceso HTTP de smoke ejecutándose.
-- [x] Los 229 paquetes siguen pasando `uv pip check`; OpenCode recreado responde
-  HTTP 200 autenticado. Los seis contenedores sandbox-17/19 conservan sus IDs y
-  estado en marcha, sin recreaciones ni cambios de sus manifiestos.
-- No se implementa todavía restauración/neutralización integrada en la CLI, ni se
-  considera demostrada la compatibilidad funcional de todos los módulos Realista.
+- [x] Add `[postgres]` with major version 16/18 and optional pgvector, keeping
+  PostgreSQL 16 and its volumes for existing manifests without that section.
+- [x] Separate the PG18 volume (`db-data-pg18`) from the original PG16 volume (`db-data`),
+  mounted at `/var/lib/postgresql` for the PG18 layout, with no implicit migration/deletion.
+- [x] Require `configure --allow-database-switch` consent when changing major versions,
+  and reject the explicit switch while services are running.
+- [x] Install a matching major-version client from signed PGDG packages and separate
+  Odoo/OpenCode images by PostgreSQL version.
+- [x] Configure Realista lab for PostgreSQL 18 and pgvector 0.8.7 with a fresh database,
+  as authorized; preserve the existing PG16 volume, filestore, and OpenCode state.
+- [x] 386 automated tests passed and Ruff checks passed.
+- [x] Live validation in Realista lab (macOS arm64/Docker Desktop): server and
+  `psql`/`pg_dump`/`pg_restore` clients at 18.6, pgvector 0.8.7, and directory
+  `/var/lib/postgresql/18/docker` on the new volume.
+- [x] Create the extension and query vectors in a temporary database; a custom-format
+  dump using the Odoo container's client and restore into another database preserve
+  the extension and rows. Both databases and the temporary dump are deleted afterward.
+- [x] Initialize `dev` with Odoo 19, enable `vector` in it, and verify its UUID,
+  extension, and test vector data after `down`/`up --code --no-build`.
+  The temporary persistence database is deleted; `dev` is preserved.
+- [x] Read `PG_VERSION = 16` in the previous volume through a read-only mount;
+  it is neither deleted nor mounted as the PostgreSQL 18 server's data.
+- [x] HTTP 200 at `/web/login`, `/base:TestACL.test_field_visibility_restriction` smoke
+  passed (one test, zero errors/failures, test database and filestore deleted).
+- [x] Wheel built; lab Odoo/OpenCode services left prepared,
+  without leaving the smoke HTTP process running.
+- [x] All 229 packages still pass `uv pip check`; recreated OpenCode returns
+  authenticated HTTP 200. All six sandbox-17/19 containers retain their IDs and
+  running state, without recreation or manifest changes.
+- CLI-integrated restore/neutralization is not implemented yet, and functional
+  compatibility of all Realista modules is not considered demonstrated.
 
-## Fuera de alcance inicial
+## Outside the initial scope
 
-Producción, Kubernetes, interfaz gráfica, ejecución distribuida, programador de
-agentes, gestor de worktrees propio, plugins públicos y asistentes distintos de
-OpenCode. No migrar ni limpiar automáticamente entornos existentes.
+Production, Kubernetes, graphical interface, distributed execution, agent
+scheduler, custom worktree manager, public plugins, and assistants other than
+OpenCode. Do not automatically migrate or clean up existing environments.
 
-## Publicación del motor compartido
+## Shared engine publication
 
-- [x] Conservar el antiguo `main` de `isturiz/odoocker` en la rama remota
-  `legacy/copied-template`, commit `7fc86a36fa6537b964dea9fcfc5431423cded276`.
-- [x] Mantener el historial anterior como ascendencia del nuevo motor; no crear
-  una historia huérfana ni utilizar force push.
-- [x] Revisar archivos publicables: sin configuración privada de Realista, estado
-  generado, credenciales ni rutas de máquina. Añadir exclusiones preventivas al gitignore.
-- [x] Documentar la transición y corregir la limitación obsoleta del cliente PostgreSQL 15.
-- [x] Publicar la sustitución de la plantilla por el motor mediante
-  [PR #2](https://github.com/isturiz/odoocker/pull/2), conservando el historial.
-- No modificar clones de clientes, servicios en marcha, funciones Fish ni configuración global.
+- [x] Preserve the old `isturiz/odoocker` `main` on the remote
+  `legacy/copied-template` branch, commit `7fc86a36fa6537b964dea9fcfc5431423cded276`.
+- [x] Keep the previous history as ancestry of the new engine; do not create
+  an orphan history or use force push.
+- [x] Review publishable files: no private Realista configuration, generated
+  state, credentials, or machine-specific paths. Add preventive gitignore exclusions.
+- [x] Document the transition and correct the outdated PostgreSQL 15 client limitation.
+- [x] Publish the replacement of the template with the engine through
+  [PR #2](https://github.com/isturiz/odoocker/pull/2), preserving history.
+- Do not modify client clones, running services, Fish functions, or global configuration.
 
-## Adopción local de la CLI instalada
+## Local adoption of the installed CLI
 
-- [x] Tras autorización del usuario y retirada por él de la restricción en AGENTS.md,
-  instalar `odoocker` con `uv tool install --python 3.12` desde GitHub/main,
-  revisión inicial `2026dd62fa7d6420b0352e6bda879f57fef6d395`.
-- [x] Archivar fuera de autoload las funciones Fish antiguas `odx`, `oc`, `odooctl`
-  y los completions de `odx`/`odooctl`, sin cambiar su contenido; conservar manifiesto
-  de checksums e instrucciones de recuperación en el archivo local.
-- [x] Retirar el alias `odooctl` en vez de redirigirlo silenciosamente a otra CLI;
-  dejar `oc` como wrapper mínimo de `command odx code opencode $argv`.
-- [x] Sustituir completions antiguos por los comandos/opciones del motor nuevo.
-  Mantener `oc2`, `ocweb`, PATH y configuración nativa de OpenCode sin cambios.
-- [x] Validación en Fish nuevo: `odx` resuelve como ejecutable, versión 0.1.0,
-  help correcto, sin alias `odooctl` y sin sugerencias de comandos antiguos.
-- [x] Comprobar sintaxis Fish, checksums de los cinco originales y forwarding de
-  argumentos con espacios/código de salida mediante un ejecutable de prueba aislado.
-- [x] `odx code opencode --info` desde la instalación conecta con la instancia
-  Realista lab existente y verifica OpenCode 2.0.30 sin recrear servicios.
-- [x] Documentar instalación de usuario, convivencia con Fish, actualización y
-  acceso directo opcional `oc` sin rutas específicas de máquina.
-- [x] Crear un workspace desechable usando el binario instalado desde Fish y
-  verificar `fetch --dry-run` sin Docker ni descargas; eliminar solo ese fixture.
-- [x] 386 tests del motor y Ruff lint/formato correctos; `oc --info` también funciona
-  desde Fish dentro del laboratorio existente. README/TODO actualizados sin commit.
-- Las terminales ya abiertas requieren abrir una nueva o descargar las funciones
-  y completions antiguos de su memoria. Los comandos legacy sin equivalente siguen pendientes.
+- [x] After user authorization and their removal of the restriction in AGENTS.md,
+  install `odoocker` with `uv tool install --python 3.12` from GitHub/main,
+  initial revision `2026dd62fa7d6420b0352e6bda879f57fef6d395`.
+- [x] Archive the old `odx`, `oc`, and `odooctl` Fish functions and `odx`/`odooctl`
+  completions outside autoload without changing their contents; retain a checksum
+  manifest and recovery instructions in the local archive.
+- [x] Remove the `odooctl` alias instead of silently redirecting it to another CLI;
+  leave `oc` as a minimal wrapper around `command odx code opencode $argv`.
+- [x] Replace old completions with the new engine's commands/options.
+  Keep `oc2`, `ocweb`, PATH, and native OpenCode configuration unchanged.
+- [x] Validate in a fresh Fish session: `odx` resolves to an executable, version 0.1.0,
+  correct help, no `odooctl` alias, and no old command suggestions.
+- [x] Check Fish syntax, checksums of all five originals, and forwarding of
+  arguments with spaces/exit codes using an isolated test executable.
+- [x] `odx code opencode --info` from the installation connects to the existing
+  Realista lab instance and verifies OpenCode 2.0.30 without recreating services.
+- [x] Document user-local installation, coexistence with Fish, updates, and
+  the optional `oc` shortcut without machine-specific paths.
+- [x] Create a disposable workspace using the installed binary from Fish and
+  verify `fetch --dry-run` without Docker or downloads; delete only that fixture.
+- [x] 386 engine tests and Ruff lint/format checks passed; `oc --info` also works
+  from Fish inside the existing lab. README/TODO updated without committing.
+- Already-open terminals require opening a new one or unloading the old functions
+  and completions from memory. Legacy commands without equivalents remain pending.
 
-## Actualización explícita de OpenCode
+## Explicit OpenCode update
 
-- [x] Añadir `odx code opencode update` para adoptar la versión exacta del host sin
-  actualizar el host ni recuperar el subcomando global `oc update`.
-- [x] Preservar comentarios/configuración TOML; rechazar layouts que no se puedan
-  editar con seguridad y cambios pendientes no relacionados con OpenCode.
-- [x] Bloqueos de workspace/instancia y contenedor de mantenimiento con locks Linux
-  durante todo el proceso; rechazar sesiones activas y operaciones Odoo gestionadas.
-- [x] Detener solo Odoo/OpenCode de la instancia, respaldar los tres volúmenes nativos
-  y configuración anterior con permisos privados y checksum, sin Docker socket ni
-  creación silenciosa de volúmenes ausentes.
-- [x] Regenerar, construir, recrear y verificar versión/API; conservar respaldo y
-  resultado por fases sin downgrade/restauración automática ante fallos.
-- [x] Rechazar downgrades antes de parar servicios (también prereleases); identificar
-  la imagen real del contenedor anterior para reintentos tras un build incompleto.
-- [x] 422 pruebas automatizadas superadas, incluidas transacciones de fallo,
-  conservación de datos/configuración, protocolo de backup y retención real de locks.
-- [x] Validar en el workspace propio `update-smoke` la actualización real 2.0.30 ->
-  2.0.31, API autenticada, conservación de sesión/título y contenido sintético
-  pendiente en inbox (sin invocar proveedores), y marcadores en los tres volúmenes.
-- [x] Comprobar respaldo completo, SHA-256 y permisos 0700/0600; PostgreSQL conserva
-  el mismo ID y no se recrea durante la actualización; guard temporal eliminado.
-- [x] Validar rechazo con lock Odoo ocupado sin parar servicios ni editar manifiesto;
-  fallo de build inyectado conserva backup y deja solo PostgreSQL en marcha, con locks
-  liberados después de parar Odoo/OpenCode. Reintentar con el comando normal funciona.
-- [x] Validar reintento cuando el Compose apunta a una imagen nueva inexistente,
-  usando la imagen real anterior por ID para el contenedor de mantenimiento.
-- [x] Smoke Odoo 19 superado (una prueba, cero errores/fallos, recursos temporales
-  limpiados), wheel construido y help ejecutado desde instalación aislada.
-- [x] Parar el workspace de validación conservando sus volúmenes y respaldos;
-  no actualizar las instancias de Realista ni los sandboxes existentes.
-- [ ] Restauración guiada del respaldo de estado OpenCode tras una actualización fallida.
-- El pin sigue siendo de workspace y la actualización de servicios, por instancia.
-  Los procesos externos y nuevos clientes requieren coordinación humana durante mantenimiento.
-- Distribución: publicar el motor en GitHub/main y renovar la CLI con
-  `uv tool upgrade odoocker`, conservando su origen Git. Verificar el help y la
-  revisión instalada sin ejecutar el updater sobre ningún workspace del usuario.
-- La instalación/actualización de la CLI y la actualización del servidor OpenCode
-  son operaciones independientes; los contenedores solo cambian por petición explícita.
+- [x] Add `odx code opencode update` to adopt the exact host version without
+  updating the host or bringing back the global `oc update` subcommand.
+- [x] Preserve TOML comments/configuration; reject layouts that cannot be safely
+  edited and pending changes unrelated to OpenCode.
+- [x] Workspace/instance locks and a maintenance container with Linux locks
+  throughout the process; reject active sessions and managed Odoo operations.
+- [x] Stop only the instance's Odoo/OpenCode services, back up all three native volumes
+  and previous configuration with private permissions and a checksum, without the Docker
+  socket or silently creating missing volumes.
+- [x] Regenerate, build, recreate, and verify version/API; retain the backup and
+  phased result without automatic downgrade/restore on failure.
+- [x] Reject downgrades before stopping services (including prereleases); identify
+  the previous container's actual image for retries after an incomplete build.
+- [x] 422 automated tests passed, including failure transactions,
+  data/configuration preservation, backup protocol, and actual lock retention.
+- [x] Validate the live 2.0.30 -> 2.0.31 update in the project's own `update-smoke`
+  workspace, authenticated API, preservation of session/title and synthetic pending
+  inbox content (without invoking providers), and markers in all three volumes.
+- [x] Check complete backup, SHA-256, and 0700/0600 permissions; PostgreSQL retains
+  the same ID and is not recreated during the update; temporary guard removed.
+- [x] Validate rejection with an occupied Odoo lock without stopping services or editing
+  the manifest; injected build failure preserves the backup and leaves only PostgreSQL
+  running, with locks released after stopping Odoo/OpenCode. Retrying normally works.
+- [x] Validate retry when Compose points to a new image that does not exist,
+  using the actual previous image by ID for the maintenance container.
+- [x] Odoo 19 smoke passed (one test, zero errors/failures, temporary resources
+  cleaned up), wheel built, and help run from an isolated installation.
+- [x] Stop the validation workspace, preserving its volumes and backups;
+  do not update Realista instances or existing sandboxes.
+- [ ] Guided restoration of the OpenCode state backup after a failed update.
+- The pin remains workspace-wide, while service updates are per instance.
+  External processes and new clients require human coordination during maintenance.
+- Distribution: publish the engine on GitHub/main and upgrade the CLI with
+  `uv tool upgrade odoocker`, preserving its Git origin. Verify help and the
+  installed revision without running the updater on any user workspace.
+- CLI installation/upgrades and OpenCode server updates are independent operations;
+  containers only change on explicit request.
 
-## Preparación inicial simplificada
+## Simplified initial setup
 
-- [x] Añadir `odx setup` y `odx setup --code`, conservando configure/up/deps y fetch
-  individuales; no inicializar/restaurar bases ni modificar pins automáticamente.
-- [x] Preparar la construcción por separado, adquirir leases Linux de entorno/base
-  habitual y mantenerlos durante configure/up/deps y el arranque opcional de OpenCode.
-- [x] Reutilizar el protocolo de mantenimiento existente con el updater OpenCode,
-  sin duplicar lógica de procesos ni añadir un framework de orquestación.
-- [x] Omitir deps cuando el intérprete y el marcador/fingerprint actuales son válidos;
-  mantener `odx deps` como reinstalación explícita y conservar las limitaciones de includes.
-- [x] Rechazar operaciones gestionadas/sesiones activas sin detenerlas; conservar un
-  OpenCode previamente activo aunque setup se invoque sin --code, y avisar de pins
-  host/contenedor distintos sin actualizarlos ni impedir la preparación inicial.
-- [x] Pruebas automatizadas de orden, fallos por fase, primera instalación,
-  configuración concurrente, locks, conservación del manifiesto y no inicialización DB.
-- [x] 455 pruebas automatizadas superadas y Ruff correcto, incluidas regresiones del
-  updater tras compartir la gestión de leases y marcadores de deps corruptos/no objeto.
-- [x] Primera instalación real `setup --code` en el workspace propio `setup-smoke`:
-  Odoo 19, PostgreSQL 16, 66 paquetes compatibles y OpenCode 2.0.31 con API autenticada.
-- [x] Repetir setup sin --code conserva el OpenCode antes activo y el ID PostgreSQL;
-  no reinstala paquetes (contenido y mtime ns del marcador intactos), no cambia
-  manifiesto y no crea `dev`. Temporales de construcción eliminados al terminar.
-- [x] Un lock real ocupado rechaza setup sin alterar IDs de contenedores ni Compose.
-- [x] Un requirement inválido de prueba detiene deps antes del arranque OpenCode,
-  elimina el marcador de listo y libera locks. Restaurar solo ese fixture y repetir
-  setup --code recupera el entorno y pasa uv pip check.
-- [x] Updater con respaldo sigue funcionando en ese workspace tras extraer las
-  utilidades compartidas; smoke Odoo 19 correcto con una prueba y limpieza de recursos.
-- [x] Parar el workspace de validación conservando volúmenes/respaldos; ningún
-  contenedor Realista ni sandbox existente se recrea en esta entrega.
-- [x] Construir wheel/sdist y comprobar `odx setup --help` desde el wheel instalado
-  en un entorno aislado.
-- Distribución explícita: publicar en GitHub/main y actualizar la CLI con
-  `uv tool upgrade odoocker`, conservando el origen Git. Comprobar el help del
-  comando instalado sin preparar automáticamente los servicios del cliente.
-- `odx fetch` sigue siendo independiente: clona solo fuentes ausentes y conserva
-  repositorios, ramas y cambios existentes; no equivale a pull ni a setup.
+- [x] Add `odx setup` and `odx setup --code`, retaining individual configure/up/deps
+  and fetch commands; do not initialize/restore databases or change pins automatically.
+- [x] Stage the build separately, acquire Linux environment/regular database leases,
+  and hold them through configure/up/deps and optional OpenCode startup.
+- [x] Reuse the existing maintenance protocol with the OpenCode updater,
+  without duplicating process logic or adding an orchestration framework.
+- [x] Skip deps when the current interpreter and marker/fingerprint are valid;
+  keep `odx deps` as explicit reinstallation and retain include limitations.
+- [x] Reject managed operations/active sessions without stopping them; preserve a
+  previously running OpenCode even when setup is invoked without --code, and warn
+  about differing host/container pins without updating them or blocking initial setup.
+- [x] Automated tests for ordering, phase failures, first installation,
+  concurrent configuration, locks, manifest preservation, and no database initialization.
+- [x] 455 automated tests passed and Ruff checks passed, including updater regressions
+  after sharing lease management and corrupt/non-object deps markers.
+- [x] Live first installation with `setup --code` in the project's own `setup-smoke`
+  workspace: Odoo 19, PostgreSQL 16, 66 compatible packages, and OpenCode 2.0.31
+  with an authenticated API.
+- [x] Repeating setup without --code preserves the previously running OpenCode and
+  PostgreSQL ID; it does not reinstall packages (marker contents and nanosecond mtime
+  unchanged), change the manifest, or create `dev`. Temporary build files removed afterward.
+- [x] An occupied live lock rejects setup without altering container IDs or Compose.
+- [x] An invalid test requirement stops deps before OpenCode startup, deletes the
+  ready marker, and releases locks. Restoring only that fixture and repeating
+  setup --code recovers the environment and passes uv pip check.
+- [x] The updater with backups still works in that workspace after extracting shared
+  utilities; Odoo 19 smoke passed with one test and resource cleanup.
+- [x] Stop the validation workspace, preserving volumes/backups; no Realista or
+  existing sandbox container is recreated in this delivery.
+- [x] Build wheel/sdist and check `odx setup --help` from the wheel installed
+  in an isolated environment.
+- Explicit distribution: publish on GitHub/main and upgrade the CLI with
+  `uv tool upgrade odoocker`, preserving the Git origin. Check the installed
+  command's help without automatically setting up the client's services.
+- `odx fetch` remains independent: it only clones missing sources and preserves
+  existing repositories, branches, and changes; it is neither pull nor setup.
+
+## English documentation
+
+- [x] Translate README and TODO into English, including illustrative example names.
+- [x] Preserve task status, historical validation results, safety warnings, and real references.
+- [x] Verify links, code examples, and all 127 historical task statuses; 455 automated
+  tests, Ruff lint, and Git whitespace checks passed. No remaining Spanish detected
+  in tracked files.
+- Documentation-only delivery; no new live Docker validation is required or claimed.
