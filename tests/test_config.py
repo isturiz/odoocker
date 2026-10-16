@@ -122,11 +122,32 @@ def test_required_sections_cannot_be_omitted(root, table):
         Workspace.load(root)
 
 
-@pytest.mark.parametrize("value", ['"18.0"', '"17"', "17", "true", "[]", "{}"])
-def test_odoo_version_requires_supported_string(root, value):
+@pytest.mark.parametrize(
+    "value",
+    [
+        '"17"',
+        '"0.0"',
+        '"018.0"',
+        '"18.1"',
+        '"latest"',
+        '"../18.0"',
+        '"18.0\\n"',
+        "17",
+        "true",
+        "[]",
+        "{}",
+    ],
+)
+def test_odoo_version_requires_stable_major_string(root, value):
     (root / MANIFEST).write_text(VALID_MANIFEST.replace('"17.0"', value))
-    with pytest.raises(OdxError, match="odoo.version must be one of 17.0, 19.0"):
+    with pytest.raises(OdxError, match="odoo.version must be a stable major version string"):
         Workspace.load(root)
+
+
+@pytest.mark.parametrize("version", ["18.0", "20.0", "25.0"])
+def test_unvalidated_versions_are_not_rejected_by_a_release_whitelist(root, version):
+    (root / MANIFEST).write_text(VALID_MANIFEST.replace('"17.0"', f'"{version}"'))
+    assert Workspace.load(root).odoo_version == version
 
 
 @pytest.mark.parametrize(

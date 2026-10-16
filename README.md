@@ -23,10 +23,19 @@ Private client configurations and data are not part of the engine.
   the client must match. The host is not updated automatically.
 - Internet access for images, source code, and dependencies.
 
-The initial profile uses Python 3.12 and PostgreSQL 16 for Odoo 17 and 19;
-PostgreSQL 18 and pgvector can be selected per workspace. Each instance
-has its own Linux virtualenv. Base image versions are pinned by tag;
-digest pinning and source/dependency locking are still pending.
+The initial profile uses Python 3.12 and PostgreSQL 16; PostgreSQL 18 and pgvector
+can be selected per workspace. Each instance has its own Linux virtualenv. Base
+image versions are pinned by tag; digest pinning and source/dependency locking
+are still pending.
+
+Odoo versions use the stable `MAJOR.0` format. **17.0 and 19.0 are live-validated,
+not an acceptance whitelist.** Other versions are accepted with a warning, not a
+promise of compatibility: their Python, dependencies, addons and exposed APIs must
+work with the selected runtime. Literal minimum-Python metadata is checked without
+executing checkout code; native Odoo/dependency checks still apply when metadata
+is absent. The current Python image is not changed automatically to accommodate a
+different Odoo. Restore compatibility follows inspected capabilities, not release
+number branches; unknown or ambiguous capabilities fail rather than being guessed.
 
 ## Install the CLI
 
@@ -47,9 +56,10 @@ before adopting the new command. `functions --erase odx` only unloads the functi
 from the current session: it does not remove its file. In the meantime,
 `command odx` runs the binary without going through the function.
 
-Also review aliases such as `odooctl` and wrappers such as `oc`: the old restore,
-password, and `oc sync`/`update`/`pair` commands have no automatic equivalent in
-the new CLI. An optional shortcut with no duplicated logic is:
+Also review aliases such as `odooctl` and wrappers such as `oc`: old helper syntax
+is not automatically translated. Restores now use the explicit `odx db restore`
+workflow below; `oc sync`/`update`/`pair` are not restored as aliases. An optional
+shortcut with no duplicated logic is:
 
 ```fish
 function oc --wraps 'odx code opencode'
@@ -332,12 +342,123 @@ for the first time, its volume will be empty; initialize `dev` with
 Switching back to a previous version reuses that version's volume: the flag does
 not guarantee a fresh database every time. The filestore, Python environment, and
 OpenCode state are preserved; the flag is not a reset.
-Integrated restore and neutralization are still pending.
+For an existing development backup, use `odx db restore` as described below.
 
 `.odoocker/` contains local identity, secrets, and generated files; **do not copy,
 version, or delete it to clean an environment**: losing its identity leaves previous
 volumes unassociated. Moving a stateful workspace requires a future migration feature.
 PostgreSQL and OpenCode passwords are private and local to each instance.
+
+## Restore a development backup
+
+From a prepared workspace, **on the host**, restore a trusted native Odoo ZIP:
+
+```sh
+odx db restore /path/to/backup.zip
+```
+
+The ZIP must contain plain `dump.sql` and, when attachments are present, its native
+`filestore/`. An optional Odoo `manifest.json` is accepted. Custom-format dumps,
+arbitrary ZIP layouts, encrypted entries and links are not supported. ZIP metadata,
+CRC, source SHA-256 and referenced attachment sizes/checksums are checked. Use only
+trusted backups: SQL and installed addon code are executable, not a safe format for
+untrusted input. **This is development-only and performs no Odoo migration or
+PostgreSQL downgrade.** It does not fetch or switch addon branches.
+
+Defaults are conservative:
+
+- Target is the selected instance's `dev`. An existing DB or filestore is rejected;
+  `--replace` explicitly preserves the old pair under a generated recovery name.
+- Missing PostgreSQL roles stop the operation before SQL import. Review the private
+  role inventory, then opt into `--create-missing-roles` if appropriate. New roles
+  are `NOLOGIN`, non-superuser, without database/role creation, inheritance,
+  replication or RLS bypass. Existing roles are **not altered or privilege-audited**.
+  Object grants/ownership from the dump still apply. Role membership grants,
+  cluster administration and transaction-control statements are rejected by the
+  bounded pg_dump reader, which is not a general-purpose SQL parser.
+- Passwords are preserved. `--reset-admin-password` explicitly sets the password
+  of `base.user_admin` to **`admin`**, keeping its login, permissions and MFA intact.
+  It never assumes a numeric user ID or activates an inactive administrator.
+- Modules are not updated unless requested. `--update-outdated` selects installed
+  modules whose local manifest is newer, plus owners of detected missing stored
+  columns, including same-version changes. `--update module_a,module_b` selects
+  specific installed modules instead. The two modes are mutually exclusive;
+  neither accepts `all`, installs arbitrary modules or permits a selected downgrade.
+  Odoo may also update/install required dependencies according to its native rules.
+
+For example, explicitly replace `dev`, resolve missing roles, update outdated
+installed addons and set the weak local administrator password:
+
+```sh
+odx db restore /path/to/backup.zip --replace \
+  --create-missing-roles --update-outdated --reset-admin-password
+```
+
+Close OpenCode clients and finish `run`, tests and dependency operations first.
+Active managed operations or foreground OpenCode sessions reject the restore.
+The workflow pauses only this instance's support containers and runs PostgreSQL
+and the restore worker **without IP networking**, using a private Unix socket.
+No Docker socket is mounted. The worker retains native environment/database leases
+even if the host controller disappears; arbitrary external Docker operations remain
+outside the locking protocol. Never run two PostgreSQL processes on the same volume.
+
+Restoration happens in a generated staging DB and filestore. Before upgrades,
+another DB/filestore checkpoint preserves the first imported copy. Native module
+neutralization runs before registry hooks and again after upgrades/preparation;
+all cron jobs and real mail servers must remain disabled across a fresh registry
+load. Unknown integration behavior is not automatically neutralized: client addons
+must supply their own native `data/neutralize.sql`, and a hook undoing neutralization
+blocks publication. This is **not anonymization** or complete functional validation.
+
+Only a validated pair is published as `dev`. Copy UUID/secret are regenerated and
+the local URL is set after support containers restart. Odoo itself is not started:
+
+```sh
+odx run
+odx status
+```
+
+### Continue a stopped restore
+
+The command prints an operation ID and private recovery directory. Fix the cause
+and continue with that ID rather than importing a large ZIP again:
+
+```sh
+odx db restore --resume <id> --create-missing-roles
+odx db restore --resume <id> --update-outdated --reset-admin-password
+# Or choose exact modules instead of --update-outdated:
+odx db restore --resume <id> --update module_a,module_b
+```
+
+Explicit options are retained across retries; a new update mode replaces the
+previous selection mode. Once publication begins, options cannot change. Completed
+operations are idempotent. An import receipt committed in the SQL transaction
+distinguishes a completed import from a rolled-back attempt. Publication records
+native DB/file identities so a retry can reconcile partially completed renames
+without merging directories, overwriting collisions, or discarding recovery copies.
+Pending/partially updated databases or failed migrations can still require manual
+review; `--resume` is not a generic migration repair tool. Instance configuration
+must still match, while addon code may be corrected deliberately between retries.
+
+Artifacts remain under `.odoocker/instances/<instance>/restores/<id>/`: `result.json`,
+private logs, an engine snapshot, generated maintenance configuration and
+`access.json`. The latter records the unchanged administrator login and current URL;
+its password is `null` when the restored password was preserved. These files include
+password hashes, copy secrets and potentially client data: **never commit or share
+them**. Extracted data, update checkpoints, previous DB/filestore pairs, created roles
+and the private socket volume are retained, not garbage-collected. Roles belong to
+the instance's cluster and can remain even if the import fails; role creation
+attempts/commit status are recorded. Budget disk space for the extracted SQL plus
+DB/filestore checkpoints and PostgreSQL temporary/WAL space.
+
+On failure, normal PostgreSQL and the idle Odoo support container are recovered
+only after the isolated services stop. OpenCode may remain stopped until a
+successful retry. If the host was killed, first inspect the operation: do not
+interrupt a still-active worker. An explicit resume can recover stopped support
+services when the worker has exited. Keep all generated resources for diagnosis;
+do not remove volumes, copy `.odoocker`, or automatically retry with `-u all`.
+On Linux, the current UID-1000 image must be able to read/write the private bind
+directory; configurable UID/GID is not implemented.
 
 ## Multiple instances and agents
 
@@ -402,8 +523,9 @@ there is no automatic garbage collector yet. Do not use `down` during active ope
 - Change detection uses direct requirements; changes to `-r` includes must be
   applied by running `deps` explicitly.
 - PostgreSQL is not exposed to the host. The included client matches the server's
-  major version (16/18); CLI-integrated backup/restore and neutralization are
-  still pending.
+  major version (16/18). Restore supports trusted native Odoo SQL ZIPs; an integrated
+  backup command, custom-format imports and automatic recovery-copy cleanup remain
+  pending.
 - The image uses UID/GID 1000. On Linux, editable directories must allow that user
   to write; configurable UID/GID is still pending.
 - Model credentials are configured on the new server with `/connect`;

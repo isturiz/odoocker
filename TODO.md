@@ -87,7 +87,8 @@ and live validation distinct.
 
 ## 5. Adapters and adoption
 
-- [ ] Safe generic restore and per-version neutralization.
+- [x] Initial trusted Odoo SQL ZIP restore with native module neutralization,
+  explicit role policy, update checkpoints and resumable publication (details below).
 - [ ] Cloudpepper adapter without version-controlled credentials.
 - [ ] Adapt Realista-specific scripts.
 - [x] Private OpenCode state backup before explicit updates.
@@ -190,8 +191,9 @@ and live validation distinct.
 - [x] All 229 packages still pass `uv pip check`; recreated OpenCode returns
   authenticated HTTP 200. All six sandbox-17/19 containers retain their IDs and
   running state, without recreation or manifest changes.
-- CLI-integrated restore/neutralization is not implemented yet, and functional
-  compatibility of all Realista modules is not considered demonstrated.
+- At that delivery, CLI-integrated restore/neutralization was not implemented;
+  see the later integrated restore delivery below. Functional compatibility of
+  all Realista modules is still not considered demonstrated.
 
 ## Outside the initial scope
 
@@ -346,8 +348,60 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   normal server starts, confirm zero active crons, real outgoing mail servers,
   incoming mail servers, and pending module operations. Preserve private access
   details, logs, and recovery copies; do not publish client secrets or backup data.
-- The addon fix is local and uncommitted. This validation is not a full client
+- The initial addon fix was kept local until separately authorized publication.
+  This validation is not a full client
   functional, browser, PDF, or external integration review, nor anonymization.
-- [ ] Integrate a safe generic restore workflow separately, with explicit role/ACL
+- [x] Integrate an initial trusted-ZIP restore workflow separately, with explicit role/ACL
   policy, resumability, recovery checkpoints, and per-version neutralization. The
   one-off text-based role inventory is not a complete SQL parser or a public API.
+
+## Integrated development restore and capability compatibility
+
+- [x] Add host-only `odx db restore <backup.zip>` and `--resume <id>`, without
+  importing private client scripts or names into the core. Keep existing workspaces
+  and the installed/global CLI unchanged unless explicitly prepared/upgraded.
+- [x] Validate ZIP paths/types/CRC and source SHA-256; import SQL transactionally
+  with a completion receipt. Keep DB/filestore checkpoints and prior destination
+  identities; reject collisions and reconcile interrupted publication on resume.
+- [x] Reject an existing `dev` without `--replace`. Acquire host/Linux leases,
+  reject active managed operations/conversations and use offline PostgreSQL/worker
+  containers with a Unix socket and explicitly scoped Compose/volume names.
+- [x] Default to diagnosing missing roles. Allow restricted NOLOGIN creation only
+  with `--create-missing-roles`; preserve existing roles and record creation attempts.
+  Parse pg_dump lexical boundaries, including quoted identifiers, comments, dollar
+  bodies and COPY rows; reject unsupported client/cluster/transaction operations.
+- [x] Keep copied administrator credentials unless `--reset-admin-password` requests
+  password `admin` for `base.user_admin`, without changing its login, privileges or MFA.
+  Support exact installed-module updates and `--update-outdated`, including newer
+  local manifests and same-version missing-column owners, with no `-u all`/downgrades.
+- [x] Run native module neutralization before hooks and after updates/preparation;
+  reject reactivated cron/mail, pending modules, missing schema and invalid attachments.
+  Publish only after verification, regenerate copy identifiers and refresh the local URL.
+- [x] Replace Odoo-release branches with capability checks for config/logging,
+  demo-option semantics and a structurally inspected registration-hook boundary.
+  Fail closed on unknown capabilities; do not catch-and-retry internal TypeError.
+- [x] Accept stable `MAJOR.0` version strings independently from the informational
+  live-validated list (17.0/19.0). Warn about unvalidated versions without corrupting
+  JSON stdout; inspect literal minimum-Python metadata without executing source code.
+  Do not claim arbitrary releases work with the current Python/image/dependencies.
+- [x] Live dedicated Odoo 19/PostgreSQL 18 workspace: native synthetic ZIP, missing
+  role default rejection and explicit creation, transaction retry without re-extraction,
+  same-version/newer-version fixture addon updates, password reset and preservation,
+  retained replacement/update copies, 11 attachment checks and zero active cron jobs.
+- [x] Live dedicated Odoo 17/PostgreSQL 16 workspace: native synthetic ZIP restore,
+  neutralization, explicit base update, password reset and 56 attachment checks.
+  Repeat both releases after replacing all release-based restore branches.
+- [x] Live busy-lease rejection preserves normal container IDs. Only the new restore
+  validation workspaces were addressed; Realista and existing sandboxes were not changed.
+- [x] 569 automated tests pass, including capability shapes with no release-number
+  dispatch, invalid/unknown metadata, role/ZIP boundaries, explicit update policy,
+  host/Linux busy rejection and interrupted import/publication recovery.
+- [x] Verify final password reset, zero active crons/pending modules, unchanged input
+  archive hashes and completed-resume idempotence in both dedicated workspaces.
+  Stop their normal services afterward, preserving volumes, backups and checkpoints.
+- [x] Ruff lint/format, Git whitespace checks and source/wheel builds pass. Install
+  the wheel in an isolated environment and verify the packaged restore modules and
+  CLI options. Distribution is explicit: publishing the engine does not upgrade
+  the installed/global CLI or recreate client containers automatically.
+- [ ] Integrated backup command, arbitrary/custom dump formats, automatic recovery-copy
+  cleanup, role mapping/privilege migration and full client functional/PDF/browser tests.

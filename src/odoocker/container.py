@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .errors import OdxError
 from .locking import locked
+from .odoo_compat import check_python_minimum
 from .runtime import run_command, write_private
 
 STATE = Path("/var/lib/odoocker")
@@ -50,6 +51,7 @@ def dependency_fingerprint():
 
 
 def require_ready():
+    check_python_minimum(Path(ODOO).parent)
     stamp = STATE / "dependencies.json"
     if not Path(PYTHON).is_file() or not stamp.exists():
         raise OdxError("Linux dependencies are not installed; run odx deps")
@@ -65,6 +67,7 @@ def install_dependencies(*, environment_locked=False, only_if_needed=False):
     # setup holds the Linux maintenance lease in another container for the whole
     # preparation. Normal `odx deps` still acquires its own exclusive lock.
     with nullcontext() if environment_locked else locked(STATE / "environment.lock"):
+        check_python_minimum(Path(ODOO).parent)
         if only_if_needed:
             try:
                 require_ready()

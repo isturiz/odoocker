@@ -114,6 +114,19 @@ def test_require_ready_accepts_current_dependencies(ready):
     assert container.require_ready() is None
 
 
+@pytest.mark.parametrize("operation", ["require_ready", "install_dependencies"])
+def test_declared_python_minimum_blocks_an_incompatible_runtime_without_deleting_marker(
+    ready, monkeypatch, tmp_path, operation
+):
+    source = tmp_path / "future-source"
+    (source / "odoo").mkdir(parents=True)
+    (source / "odoo/release.py").write_text("MIN_PY_VERSION = (99, 0)\n")
+    monkeypatch.setattr(container, "ODOO", str(source / "odoo-bin"))
+    with pytest.raises(OdxError, match="requires Python >= 99.0"):
+        getattr(container, operation)()
+    assert (container.STATE / "dependencies.json").exists()
+
+
 def test_conditional_dependencies_skip_valid_environment_without_installing(ready, capsys):
     original = (container.STATE / "dependencies.json").read_bytes()
     assert container.install_dependencies(only_if_needed=True) == 0
