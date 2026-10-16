@@ -207,6 +207,40 @@ def test_import_receipt_recovers_crash_before_state_save(pipeline):
     assert not any(event[0] == "import" for event in pipeline.backend.events)
 
 
+@pytest.mark.parametrize("already_imported", [False, True])
+def test_restore_into_fresh_data_volume_creates_filestore_root(pipeline, already_imported):
+    backend = pipeline.backend
+    backend.root.rmdir()
+    if already_imported:
+        name = pipeline.record["temporary"]
+        backend.create(name)
+        backend.receipts.add(name)
+        pipeline.record.update(creating_database=True, database_imported=True)
+        pipeline.record["extracted_filestore_inode"] = (
+            (backend.scratch / "extracted/filestore").stat().st_ino
+        )
+
+    pipeline.run()
+
+    assert pipeline.record["status"] == "completed"
+    assert (backend.root / "dev/fixture").read_text() == "retained content"
+    assert sum(event[0] == "import" for event in backend.events) == (0 if already_imported else 1)
+
+
+def test_restore_refuses_a_symlink_as_filestore_root(pipeline, tmp_path):
+    backend = pipeline.backend
+    backend.root.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    backend.root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OdxError, match="Unsafe filestore root"):
+        pipeline.run()
+
+    assert not list(outside.iterdir())
+    assert not pipeline.record.get("published")
+
+
 def test_existing_target_requires_replace_and_preserves_old_database_and_filestore(pipeline):
     backend = pipeline.backend
     backend.create("dev")

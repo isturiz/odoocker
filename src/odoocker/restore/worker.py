@@ -199,6 +199,11 @@ class Pipeline:
             self.save()
         if not record.get("filestore_ready"):
             self.save("filestore")
+            if backend.root.is_symlink() or (backend.root.exists() and not backend.root.is_dir()):
+                raise OdxError("Unsafe filestore root")
+            # setup creates the data volume, not an Odoo database or its filestore.
+            # The first restore must establish the parent before the atomic move.
+            backend.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             destination = backend.root / name
             if "extracted_filestore_inode" not in record:
                 record["extracted_filestore_inode"] = (extracted / "filestore").stat().st_ino
