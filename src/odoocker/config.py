@@ -12,7 +12,8 @@ MANIFEST = "odoocker.toml"
 LOCAL = "odoocker.local.toml"
 NAME = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z")
 VERSION = re.compile(r"2\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?\Z")
-SUPPORTED = ("17.0", "19.0")
+VALIDATED_ODOO_VERSIONS = ("17.0", "19.0")
+ODOO_VERSION = re.compile(r"[1-9][0-9]*\.0\Z")
 ODOO_OPTIONS = {
     "limit_memory_hard",
     "limit_memory_soft",
@@ -26,6 +27,12 @@ ODOO_OPTIONS = {
 def validate_name(value, label="name"):
     if not isinstance(value, str) or not NAME.fullmatch(value):
         raise OdxError(f"{label} must match {NAME.pattern}")
+    return value
+
+
+def validate_odoo_version(value):
+    if not isinstance(value, str) or not ODOO_VERSION.fullmatch(value):
+        raise OdxError("odoo.version must be a stable major version string, e.g. 18.0")
     return value
 
 
@@ -168,9 +175,7 @@ class Workspace:
         if type(pgvector) is not bool:
             raise OdxError("postgres.pgvector must be a boolean")
         name = validate_name(workspace.get("name"), "workspace.name")
-        version = odoo.get("version")
-        if version not in SUPPORTED:
-            raise OdxError(f"odoo.version must be one of {', '.join(SUPPORTED)}")
+        version = validate_odoo_version(odoo.get("version"))
         code_version = opencode.get("version")
         if not isinstance(code_version, str) or not VERSION.fullmatch(code_version):
             raise OdxError("opencode.version must be an exact OpenCode V2 release, e.g. 2.0.30")

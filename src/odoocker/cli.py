@@ -11,7 +11,15 @@ from pathlib import Path
 
 from . import __version__
 from .adapters import opencode
-from .config import LOCAL, MANIFEST, SUPPORTED, Workspace, find_workspace, validate_name
+from .config import (
+    LOCAL,
+    MANIFEST,
+    VALIDATED_ODOO_VERSIONS,
+    Workspace,
+    find_workspace,
+    validate_name,
+    validate_odoo_version,
+)
 from .errors import OdxError
 from .locking import locked
 from .repositories import fetch_repositories
@@ -33,7 +41,7 @@ def parser():
     )
     init.add_argument("directory", type=Path)
     init.add_argument("--name")
-    init.add_argument("--odoo", choices=SUPPORTED, default="19.0")
+    init.add_argument("--odoo", default="19.0", metavar="MAJOR.0")
     init.add_argument("--source", type=Path, help="Existing Odoo checkout, mounted read-only")
     init.add_argument(
         "--opencode-version", help="Exact V2 release; defaults to installed host version"
@@ -80,6 +88,35 @@ def parser():
     tests.add_argument(
         "--keep", action="store_true", help="Keep test DB and filestore for diagnosis"
     )
+    db = commands.add_parser("db", help="Development database maintenance")
+    databases = db.add_subparsers(dest="database_command", required=True)
+    restore = databases.add_parser(
+        "restore", help="Restore a trusted Odoo SQL ZIP into dev, with neutralization"
+    )
+    restore.add_argument("backup", type=Path, nargs="?")
+    restore.add_argument("--resume", metavar="ID", help="Continue a retained restore operation")
+    restore.add_argument(
+        "--create-missing-roles",
+        action="store_true",
+        help="Explicitly create missing dump roles as restricted NOLOGIN roles",
+    )
+    restore.add_argument(
+        "--reset-admin-password",
+        action="store_true",
+        help="Set base.user_admin's password to 'admin'; keep its login unchanged",
+    )
+    updates = restore.add_mutually_exclusive_group()
+    updates.add_argument("--update", help="Explicit comma-separated installed modules; not all")
+    updates.add_argument(
+        "--update-outdated",
+        action="store_true",
+        help="Update installed addons newer locally or responsible for missing stored columns",
+    )
+    restore.add_argument(
+        "--replace",
+        action="store_true",
+        help="Explicitly replace dev, retaining the previous database and filestore",
+    )
     code = commands.add_parser("code", help="Open a supported coding assistant")
     assistants = code.add_subparsers(dest="assistant", required=True)
     oc = assistants.add_parser(
@@ -102,6 +139,7 @@ def parser():
 def init_workspace(args):
     root = args.directory.expanduser().resolve()
     name = validate_name(args.name or root.name, "workspace name")
+    validate_odoo_version(args.odoo)
     version = args.opencode_version or opencode.host_version()
     # Validate all content before creating any user-facing files.
     if not re.fullmatch(r"2\.\d+\.\d+(?:-[\w.-]+)?", version):
@@ -138,7 +176,18 @@ def init_workspace(args):
         ),
     )
     print(f"Created {root}\nNext: cd {root}; then odx fetch and odx setup --code")
+    warn_unvalidated(args.odoo)
     return 0
+
+
+def warn_unvalidated(version):
+    if version not in VALIDATED_ODOO_VERSIONS:
+        validated = ", ".join(VALIDATED_ODOO_VERSIONS)
+        print(
+            f"Odoo {version} is not live-validated (validated: {validated}). "
+            "Runtime capabilities, Python and addon dependencies must still be compatible.",
+            file=sys.stderr,
+        )
 
 
 def fetch(workspace, *, dry_run=False):
@@ -253,6 +302,7 @@ def host(args):
     if args.command == "init":
         return init_workspace(args)
     workspace = Workspace.load(find_workspace(args.workspace))
+    warn_unvalidated(workspace.odoo_version)
     if args.command == "fetch":
         return fetch(workspace, dry_run=args.dry_run)
     if args.command == "doctor":
@@ -264,6 +314,10 @@ def host(args):
         print("Source version checked; live worktree and PDF support still require validation.")
         return 0
     runtime = Runtime.load(workspace, args.instance)
+    if args.command == "db":
+        from .restore.host import restore
+
+        return restore(runtime, args)
     if args.command == "setup":
         from .setup import prepare
 
