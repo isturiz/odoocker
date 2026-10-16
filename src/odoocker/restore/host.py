@@ -63,6 +63,8 @@ with psycopg2.connect(host=o['db_host'],user=o['db_user'],
                        'ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,value])
 """
 
+CLEANUP_SQL = (PACKAGE / "restore/cleanup.py").read_text()
+
 
 def topology(runtime):
     if not runtime.compose_file.is_file():
@@ -129,7 +131,8 @@ def options(args, previous=None):
             "replace": False,
         }
     )
-    for key in ("create_missing_roles", "reset_admin_password", "replace"):
+    result.setdefault("keep_sql", False)
+    for key in ("create_missing_roles", "reset_admin_password", "replace", "keep_sql"):
         if getattr(args, key):
             result[key] = True
     if args.update_outdated:
@@ -141,6 +144,38 @@ def options(args, previous=None):
         if "all" in result["update"]:
             raise OdxError("--update requires specific installed modules, not 'all'")
     return result
+
+
+def cleanup_sql(runtime, directory, record):
+    if record["options"].get("keep_sql"):
+        return
+    if record.get("sql_cleanup", {}).get("status") in ("removed", "absent"):
+        return
+    container_directory = "/workspace/" + directory.relative_to(runtime.workspace.root).as_posix()
+    try:
+        result = run_command(
+            runtime.compose_args(
+                "exec",
+                "-T",
+                "odoo",
+                "python3",
+                "-c",
+                CLEANUP_SQL,
+                container_directory,
+            ),
+            env=compose_env(),
+            capture=True,
+        )
+        record["sql_cleanup"] = json.loads(result.stdout)
+    except (OdxError, ValueError) as error:
+        # Publication succeeded. A housekeeping failure must not imply a bad dev.
+        record["sql_cleanup"] = {"status": "pending", "error": type(error).__name__}
+        print(
+            "WARNING: dev is restored, but temporary SQL cleanup is pending; "
+            "retry with --resume " + record["id"],
+            file=sys.stderr,
+        )
+    write_private(directory / "result.json", json.dumps(record, indent=2))
 
 
 def document(runtime, saved, directory, image, database_image, record):
@@ -259,10 +294,14 @@ def restore(runtime, args):
                     "Restore belongs to another instance/configuration; no services changed"
                 )
             changed = options(args, record["options"])
-            if record.get("publication_started") and changed != record["options"]:
+            if record.get("publication_started") and changed != {
+                "keep_sql": False,
+                **record["options"],
+            }:
                 raise OdxError("Publication has begun; resume without changing restore options")
             record["options"] = changed
             if record.get("status") == "completed" and record.get("host_finalized"):
+                cleanup_sql(runtime, directory, record)
                 print(f"Restore already completed: {directory}")
                 return 0
         else:
@@ -494,6 +533,7 @@ def restore(runtime, args):
             regular("start", "--wait", "--wait-timeout", "120", "opencode", capture=True)
         record["host_finalized"] = True
         save()
+        cleanup_sql(runtime, directory, record)
         print(f"Restored dev; {record['verified_attachments']} attachments verified. Run odx run.")
         print(f"Local access details: {directory / 'access.json'}")
         return 0

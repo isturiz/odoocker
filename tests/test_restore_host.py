@@ -51,6 +51,7 @@ def args(backup=None, **kwargs):
         update_outdated=False,
         update=None,
         replace=False,
+        keep_sql=False,
     )
     values.update(kwargs)
     return SimpleNamespace(**values)
@@ -110,6 +111,8 @@ def processes(runtime, monkeypatch):
             output = json.dumps(
                 {"database": state.target, "filestore": False, "postgres": state.postgres}
             )
+        elif action[0] == "exec" and host.CLEANUP_SQL in action:
+            output = json.dumps({"status": "removed", "bytes": 42})
         elif action[0] == "up" and action[-1] == "restore-worker":
             assert state.leased
             document = json.loads(open(file).read())
@@ -131,6 +134,7 @@ def processes(runtime, monkeypatch):
                 status="failed" if state.failed else "completed",
                 admin={"login": "local-admin"},
                 verified_attachments=3,
+                published=not state.failed,
             )
             (directory / "result.json").write_text(json.dumps(record))
         return SimpleNamespace(returncode=0, stdout=output)
@@ -152,10 +156,12 @@ def test_cli_restore_flags_and_host_only_dispatch(monkeypatch):
             "--reset-admin-password",
             "--update-outdated",
             "--replace",
+            "--keep-sql",
         ]
     )
     assert parsed.database_command == "restore"
     assert parsed.create_missing_roles and parsed.reset_admin_password and parsed.update_outdated
+    assert parsed.keep_sql
     monkeypatch.setenv("ODOOCKER_CONTAINER", "1")
     assert cli.main(["db", "restore", "backup.zip"]) == 1
 
@@ -275,3 +281,103 @@ def test_resume_does_not_rewrite_busy_workers_snapshot_or_state(runtime, backup,
         host.restore(runtime, args(resume=record["id"], reset_admin_password=True))
     assert (directory / "result.json").read_bytes() == before
     assert (directory / "engine/odoocker/restore/worker.py").read_bytes() == engine
+
+
+def test_sql_cleanup_runs_only_after_successful_host_finalization(runtime, backup, processes):
+    calls, state = processes
+    state.running.append("opencode")
+    host.restore(runtime, args(backup))
+    cleanup = next(i for i, c in enumerate(calls) if host.CLEANUP_SQL in c)
+    finalize = next(i for i, c in enumerate(calls) if host.FINALIZE in c)
+    restart = next(i for i, c in enumerate(calls) if c[0] == "start" and c[-1] == "opencode")
+    assert finalize < restart < cleanup
+    record = json.loads(next((runtime.directory / "restores").glob("*/result.json")).read_text())
+    assert record["sql_cleanup"]["status"] == "removed"
+
+
+def test_keep_sql_prevents_cleanup_and_is_retained_on_resume(runtime, backup, processes):
+    calls, state = processes
+    state.failed = True
+    with pytest.raises(OdxError):
+        host.restore(runtime, args(backup, keep_sql=True))
+    record = json.loads(next((runtime.directory / "restores").glob("*/result.json")).read_text())
+    state.failed = False
+    host.restore(runtime, args(resume=record["id"]))
+    assert not any(host.CLEANUP_SQL in c for c in calls)
+    assert host.options(args(), record["options"])["keep_sql"]
+
+
+@pytest.mark.parametrize("stage", ["worker", "finalize", "opencode"])
+def test_failed_restore_or_finalization_does_not_clean_sql(
+    runtime,
+    backup,
+    processes,
+    monkeypatch,
+    stage,
+):
+    calls, state = processes
+    state.failed = stage == "worker"
+    state.running.append("opencode")
+    original = host.run_command
+
+    def run(command, **kwargs):
+        if stage == "finalize" and host.FINALIZE in command:
+            raise OdxError("finalize failure")
+        if stage == "opencode" and command[-1] == "opencode" and "start" in command:
+            raise OdxError("restart failure")
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(host, "run_command", run)
+    with pytest.raises(OdxError):
+        host.restore(runtime, args(backup))
+    assert not any(host.CLEANUP_SQL in c for c in calls)
+
+
+def test_cleanup_failure_warns_without_failing_dev_and_resume_retries_only_cleanup(
+    runtime,
+    backup,
+    processes,
+    monkeypatch,
+    capsys,
+):
+    calls, state = processes
+    original = host.run_command
+
+    def run(command, **kwargs):
+        if host.CLEANUP_SQL in command:
+            raise OdxError("cleanup failure")
+        return original(command, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(host, "run_command", run)
+        assert host.restore(runtime, args(backup)) == 0
+    directory = next((runtime.directory / "restores").iterdir())
+    record = json.loads((directory / "result.json").read_text())
+    assert record["status"] == "completed" and record["host_finalized"]
+    assert record["sql_cleanup"]["status"] == "pending"
+    assert "cleanup is pending" in capsys.readouterr().err
+    calls.clear()
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert len(calls) == 1 and host.CLEANUP_SQL in calls[0]
+    assert json.loads((directory / "result.json").read_text())["sql_cleanup"]["status"] == "removed"
+    calls.clear()
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert not calls
+
+
+def test_legacy_completed_resume_can_clean_sql_without_changing_publication_options(
+    runtime,
+    backup,
+    processes,
+):
+    calls, state = processes
+    host.restore(runtime, args(backup))
+    directory = next((runtime.directory / "restores").iterdir())
+    record = json.loads((directory / "result.json").read_text())
+    record.pop("sql_cleanup")
+    record["options"].pop("keep_sql")
+    record["publication_started"] = True
+    (directory / "result.json").write_text(json.dumps(record))
+    calls.clear()
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert len(calls) == 1 and host.CLEANUP_SQL in calls[0]

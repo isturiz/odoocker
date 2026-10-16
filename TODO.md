@@ -405,3 +405,49 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   the installed/global CLI or recreate client containers automatically.
 - [ ] Integrated backup command, arbitrary/custom dump formats, automatic recovery-copy
   cleanup, role mapping/privilege migration and full client functional/PDF/browser tests.
+
+## Clean-volume client restore follow-up
+
+- [x] Explicitly reset only the selected client's four data/environment volumes,
+  retaining Git/source state, workspace identity/configuration, original backup and
+  the three OpenCode volumes. Verify the backup's complete CRC and SHA-256 before
+  removal and verify retained OpenCode content hashes after cleanup.
+- [x] Recreate the runtime through the installed `setup --code`, install all 229
+  dependencies into a new virtualenv and keep `dev` absent before restoration.
+- [x] Reproduce a first-restore failure when the fresh data volume has no filestore
+  parent. Create that parent privately before the atomic move; reject symlink or
+  non-directory roots. Cover both first import and resume without another SQL import.
+- [x] Preserve database-imported data modules using native `imported` metadata, not
+  module-name exceptions. Exclude them from Python-manifest comparisons/updates,
+  continue rejecting unavailable Python addons and respect the native loadable-module
+  domain during registry validation. Cover unknown/absent metadata capabilities.
+- [x] Resume the same real restore operation with the engine checkout after both
+  fixes: select 15 outdated/schema-owner modules, preserve the database-only data
+  module and verify 136,230 referenced attachments without reimporting the SQL.
+- [x] Confirm local administrator password `admin`, login and authenticated web
+  client HTTP 200, healthy OpenCode API, zero active cron/real mail servers and
+  pending module operations. Original ZIP SHA-256 and all 22 workspace/addon Git
+  states remain unchanged. Full business/integration/PDF validation is still pending.
+- [x] 580 automated tests, Ruff lint/format, whitespace checks and wheel/sdist builds
+  pass. Preserve private logs, SQL and recovery checkpoints for this live validation.
+- [ ] Explicitly upgrade the installed CLI after publication of the restore fixes;
+  this follow-up resumed from the checkout and does not modify the global installation.
+
+## Disposable restore SQL retention
+
+- [x] Delete only the extracted `dump.sql` after verified publication and successful
+  host finalization. Keep SQL on failed/incomplete restores; add explicit `--keep-sql`
+  retention, persisted across retries. Never delete the source ZIP or recovery pairs.
+- [x] Validate operation identity/completion and extraction receipt; refuse symlink
+  scratch paths or non-regular SQL files. Keep small metadata and logs untouched.
+- [x] Record cleanup results; warn rather than fail a published restore if disposal
+  fails. Completed `--resume` retries pending cleanup without stopping services or
+  reimporting SQL, including explicitly resumed older completed operations.
+- [x] 604 automated tests pass, including scoped deletion, failure/retention,
+  finalization ordering, unsafe paths, legacy records and cleanup-only retries.
+- [x] Ruff lint/format and whitespace checks pass; build wheel/sdist and verify
+  `--keep-sql` help and the packaged cleanup script from an isolated wheel install.
+- [ ] Live Docker validation of automatic SQL disposal after a new restore. Existing
+  client SQL and DB/filestore checkpoints were not deleted in this delivery.
+- [ ] Explicitly upgrade the installed CLI after publication; the new flag and
+  policy are not installed globally yet.

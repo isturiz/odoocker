@@ -385,6 +385,10 @@ Defaults are conservative:
   specific installed modules instead. The two modes are mutually exclusive;
   neither accepts `all`, installs arbitrary modules or permits a selected downgrade.
   Odoo may also update/install required dependencies according to its native rules.
+- After a successfully finalized restore, the extracted `dump.sql` is deleted
+  automatically. Use `--keep-sql` to retain it explicitly. Failed or incomplete
+  restores always keep the SQL for diagnosis and resumption. The original ZIP is
+  never deleted or modified.
 
 Database-imported data modules are preserved without requiring local Python
 manifests. They are not candidates for source-code updates; an explicit request
@@ -451,7 +455,11 @@ private logs, an engine snapshot, generated maintenance configuration and
 its password is `null` when the restored password was preserved. These files include
 password hashes, copy secrets and potentially client data: **never commit or share
 them**. Extracted data, update checkpoints, previous DB/filestore pairs, created roles
-and the private socket volume are retained, not garbage-collected. Roles belong to
+and the private socket volume are retained, except for the disposable SQL after
+success (unless `--keep-sql` was selected). SQL cleanup never removes a recovery DB
+or filestore. If cleanup fails, the command warns without treating the restored
+`dev` as failed; `--resume <id>` retries only that cleanup on a finalized operation,
+including an older completed operation that still has its SQL. Roles belong to
 the instance's cluster and can remain even if the import fails; role creation
 attempts/commit status are recorded. Budget disk space for the extracted SQL plus
 DB/filestore checkpoints and PostgreSQL temporary/WAL space.

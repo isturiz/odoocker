@@ -96,6 +96,11 @@ def parser():
     restore.add_argument("backup", type=Path, nargs="?")
     restore.add_argument("--resume", metavar="ID", help="Continue a retained restore operation")
     restore.add_argument(
+        "--keep-sql",
+        action="store_true",
+        help="Keep the extracted SQL after a successful restore (retained on failure regardless)",
+    )
+    restore.add_argument(
         "--create-missing-roles",
         action="store_true",
         help="Explicitly create missing dump roles as restricted NOLOGIN roles",
