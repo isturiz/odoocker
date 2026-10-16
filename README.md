@@ -427,6 +427,89 @@ odx run
 odx status
 ```
 
+### Database inventory and explicit deletion
+
+```sh
+odx db list
+odx db list --json
+odx db drop exact_database_name --dry-run
+odx db drop exact_database_name
+# Noninteractive, explicitly destructive:
+odx db drop exact_database_name --yes
+```
+
+These commands work on the host and inside the Odoo/OpenCode containers, without
+giving agents Docker access. Inventory shows PostgreSQL sizes (not filestore/WAL
+sizes), connection counts, protected databases and development/test/recovery names.
+The scope is **only the selected instance's PostgreSQL cluster**, not every Docker
+project. `--instance` and `--workspace` are host options; container context is fixed.
+After installing an engine release containing these commands, explicitly run
+`odx setup --code` in an idle workspace to prepare the matching in-container CLI;
+upgrading the host CLI alone does not update running containers.
+
+`drop` accepts one exact name, never patterns or `--all`, and deletes **both the
+database and its filestore**. It requires typing `delete NAME`, or explicit `--yes`
+without a terminal. `--dry-run` makes no deletions. Templates, `postgres`, databases
+owned by other roles and databases with active connections are rejected. The native
+PostgreSQL drop does not use `FORCE` or terminate clients. Database and filestore
+identities are checked again after confirmation. Stop managed Odoo runs/tests and
+shells before deleting: drop holds an exclusive environment maintenance lease.
+
+Deleting a named recovery copy deliberately loses that checkpoint. Copies belonging
+to unfinished restores are protected; fix/resume those operations first. Retained
+tests use their run-specific filestore, not `dev`'s. Missing databases do not trigger
+orphan-filestore deletion. No volumes, original ZIPs, logs or SQL inputs are removed.
+
+There is no transaction across PostgreSQL and the filesystem. Each attempt records
+private state under `/var/lib/odoocker/db-drops/<id>/` in the runtime volume. A failed
+filestore cleanup reports partial deletion and retains the remaining files, possibly
+in the recorded quarantine path. Inspect the record rather than repeating the drop
+or broadly removing directories. External, unmanaged SQL/Docker operations are not
+coordinated by these locks; do not recreate or change the selected resources during
+maintenance.
+
+### Change a development password
+
+```sh
+odx passwd
+odx passwd --login exact-login
+# Automation: pipe one password line from a secret source, never a CLI argument.
+secret-source | odx passwd --password-stdin
+```
+
+The target database is always this instance's `dev`. By default the account is
+identified by `base.user_admin`, not a hard-coded login or numeric ID. `--login`
+selects an exact account, including inactive accounts without activating them.
+Interactive input is hidden and confirmed; there is no default password and no
+`--password` argument. Noninteractive use requires `--password-stdin`, accepting
+one nonempty line (maximum 4096 characters). Do not put secrets in shell history.
+
+The command uses Odoo's native hashing API in a transaction and verifies the stored
+hash before committing. Login, activation, privileges and MFA are not reset.
+Dependencies must be prepared; stop `odx run` first. Pending/partial module updates,
+version mismatches and missing installed Python addons block the operation. No HTTP
+or cron server is started, although loading the native registry runs module hooks
+as a normal Odoo startup does. This is not a production account-management tool.
+
+### Open a service terminal
+
+```sh
+odx sh odoo
+odx sh pg
+odx sh opencode
+odx sh pg --psql
+```
+
+Choose the service explicitly. `odoo` and `opencode` open Bash; `pg` opens the
+PostgreSQL container's system shell as the OS user `postgres`, not root.
+`--psql` is only valid with `pg` and opens a
+clean psql session connected to `dev`. These are **host-only** commands and use
+already running containers; they do not start/recreate services or open an Odoo ORM
+console. EOF or `exit` closes the terminal. TTY allocation follows the caller so
+stdin can also be piped. Shells retain the host operation lock, and Odoo/OpenCode
+shells also retain a shared Linux environment lease to block dependency replacement
+and maintenance. Arbitrary commands inside a shell are still the user's responsibility.
+
 ### Continue a stopped restore
 
 The command prints an operation ID and private recovery directory. Fix the cause

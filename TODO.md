@@ -430,8 +430,8 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   states remain unchanged. Full business/integration/PDF validation is still pending.
 - [x] 580 automated tests, Ruff lint/format, whitespace checks and wheel/sdist builds
   pass. Preserve private logs, SQL and recovery checkpoints for this live validation.
-- [ ] Explicitly upgrade the installed CLI after publication of the restore fixes;
-  this follow-up resumed from the checkout and does not modify the global installation.
+- This follow-up resumed from the checkout. Host CLI distribution is included in
+  the later maintenance-command delivery below; client container updates remain explicit.
 
 ## Disposable restore SQL retention
 
@@ -449,5 +449,40 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   `--keep-sql` help and the packaged cleanup script from an isolated wheel install.
 - [ ] Live Docker validation of automatic SQL disposal after a new restore. Existing
   client SQL and DB/filestore checkpoints were not deleted in this delivery.
-- [ ] Explicitly upgrade the installed CLI after publication; the new flag and
-  policy are not installed globally yet.
+- Host CLI distribution is included in the maintenance-command delivery below;
+  installing the host package does not refresh existing client containers.
+
+## Instance database maintenance and service terminals
+
+- [x] Add host/container `db list` with PostgreSQL sizes, connection counts,
+  protected database flags, development/test/recovery classification and JSON output.
+- [x] Add exact-name `db drop` with dry-run, typed confirmation or explicit `--yes`;
+  no patterns, bulk selectors, forced connection termination or volume removal.
+  Recheck database/filestore identities after confirmation and protect templates,
+  foreign-owned databases, active connections and unfinished restore checkpoints.
+- [x] Delete the selected pair only, including retained tests' isolated filestores.
+  Keep drop audit records private, quarantine before filesystem deletion and report
+  partial failures without deleting orphan filestores or silently retrying.
+- [x] Add `passwd` targeting `dev`, administrator XML ID or exact `--login`, secure
+  confirmed terminal input and explicit `--password-stdin`. Use native hashing,
+  verify before commit and preserve login/activation/permissions/MFA. Reject pending
+  module operations and incompatible/missing code, without release-number branches.
+- [x] Add host-only `sh odoo|pg|opencode` and `sh pg --psql`, no implicit target,
+  root login, automatic service startup or Docker socket in agents. Preserve TTY,
+  selected instance, exit codes and maintenance/environment leases.
+- [x] Live dedicated Odoo 17/19 workspaces on PostgreSQL 16: passwords authenticate over HTTP,
+  renamed/inactive account fields remain intact, exact DB/filestore drops and retained
+  test cleanup pass, protected/connected targets are refused without terminating the
+  client, and all three service shells plus `psql` work. OpenCode executes inventory
+  without Docker; shell and active-server locks block destructive/dependency work.
+- [x] Keep live logs/results in those validation workspaces; do not change the client
+  workspace, original backup, global CLI or existing sandbox runtimes.
+- [x] Live PTY validation: hidden, confirmed password entry without echo and exact
+  typed drop confirmation. 707 automated tests pass, covering dispatch, leases,
+  unsafe paths, identity changes, partial deletion, password inputs and native APIs.
+- [x] Ruff lint/format and whitespace checks, wheel/sdist builds and isolated wheel
+  command-help/worker imports pass. Stop both new validation workspaces, preserving
+  their volumes, development data and private audit/log records.
+- Distribution for this delivery: publish on `main` and explicitly upgrade the host
+  CLI from its existing Git origin; verify the installed revision and command help.
+- [ ] Deliberately prepare updated client containers after the host CLI upgrade.

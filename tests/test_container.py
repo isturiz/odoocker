@@ -110,6 +110,45 @@ def test_require_ready_rejects_missing_stamp(ready):
         container.require_ready()
 
 
+def test_open_shell_holds_shared_environment_lease_without_dependencies(monkeypatch):
+    def run(args, **kwargs):
+        with (
+            pytest.raises(OdxError, match="Resource busy"),
+            locked(container.STATE / "environment.lock"),
+        ):
+            pytest.fail("shell must keep maintenance out")
+        with locked(container.STATE / "environment.lock", shared=True):
+            pass
+        assert args == ["/bin/bash"]
+        return SimpleNamespace(returncode=17)
+
+    monkeypatch.setattr(container, "run_command", run)
+    assert container.open_shell() == 17
+
+
+def test_database_worker_uses_linux_venv_without_secret_arguments(ready, monkeypatch):
+    from odoocker.cli import parser
+
+    args = parser().parse_args(["passwd", "--password-stdin"])
+    calls = []
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or SimpleNamespace(returncode=9),
+    )
+    assert container.database_command(args) == 9
+    assert calls[0][0] == (
+        [container.PYTHON, "-m", "odoocker.database", "passwd", "--password-stdin"],
+    )
+
+
+def test_database_commands_require_installed_linux_environment():
+    from odoocker.cli import parser
+
+    with pytest.raises(OdxError, match="dependencies are not installed"):
+        container.database_command(parser().parse_args(["db", "list"]))
+
+
 def test_require_ready_accepts_current_dependencies(ready):
     assert container.require_ready() is None
 

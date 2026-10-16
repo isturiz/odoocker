@@ -344,6 +344,108 @@ def test_host_deps_preserves_exit_code(host_runtime, docker_calls):
     assert_scoped_call(host_runtime, docker_calls[0], ["exec", "-T", "odoo", "odx", "deps"])
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["db", "list", "--json"],
+        ["db", "drop", "sample-19", "--dry-run"],
+        ["db", "drop", "sample", "--yes"],
+        ["passwd", "--password-stdin"],
+        ["passwd", "--login", "renamed-admin"],
+    ],
+)
+@pytest.mark.parametrize("tty", [False, True])
+def test_host_database_commands_preserve_context_and_stdin(
+    host_runtime,
+    docker_calls,
+    monkeypatch,
+    argv,
+    tty,
+):
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: tty)
+    assert cli.main(host_args(host_runtime, *argv)) == 7
+    assert_scoped_call(
+        host_runtime, docker_calls[0], ["exec", *([] if tty else ["-T"]), "odoo", "odx", *argv]
+    )
+
+
+@pytest.mark.parametrize(
+    "service,program",
+    [
+        ("odoo", ["odoo", "odx", "_shell"]),
+        ("opencode", ["opencode", "odx", "_shell"]),
+        ("pg", ["--user", "postgres", "db", "sh"]),
+    ],
+)
+@pytest.mark.parametrize("tty", [False, True])
+def test_shell_selects_only_requested_service_and_tty(
+    host_runtime,
+    docker_calls,
+    monkeypatch,
+    service,
+    program,
+    tty,
+):
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: tty)
+    assert cli.main(host_args(host_runtime, "sh", service)) == 7
+    assert_scoped_call(host_runtime, docker_calls[0], ["exec", *([] if tty else ["-T"]), *program])
+
+
+def test_psql_targets_this_instances_dev(host_runtime, docker_calls, monkeypatch):
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    assert cli.main(host_args(host_runtime, "sh", "pg", "--psql")) == 7
+    assert_scoped_call(
+        host_runtime,
+        docker_calls[0],
+        ["exec", "-T", "--user", "postgres", "db", "psql", "-X", "-U", "odoo", "--dbname=dev"],
+    )
+
+
+@pytest.mark.parametrize("service", ["odoo", "opencode"])
+def test_psql_flag_rejected_for_other_services(host_runtime, docker_calls, service):
+    assert cli.main(host_args(host_runtime, "sh", service, "--psql")) == 1
+    assert not docker_calls
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["sh"],
+        ["sh", "db"],
+        ["db", "drop"],
+        ["db", "drop", "--all"],
+        ["passwd", "--password", "unsafe"],
+        ["db", "drop", "a", "b"],
+    ],
+)
+def test_maintenance_cli_rejects_implicit_targets_bulk_deletes_and_password_arguments(argv):
+    with pytest.raises(SystemExit):
+        cli.parser().parse_args(argv)
+
+
+@pytest.mark.parametrize("argv", [["sh", "pg"], ["db", "list"], ["passwd"]])
+def test_maintenance_commands_hold_host_operation_lock(host_runtime, docker_calls, argv):
+    with locked(host_runtime.operation_lock):
+        assert cli.main(host_args(host_runtime, *argv)) == 1
+    assert not docker_calls
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["db", "list"],
+        ["db", "drop", "dev", "--yes"],
+        ["passwd", "--login", "renamed-admin", "--password-stdin"],
+    ],
+)
+def test_container_database_dispatch_without_docker(monkeypatch, argv):
+    monkeypatch.setenv("ODOOCKER_CONTAINER", "1")
+    calls = []
+    monkeypatch.setattr(container_module, "database_command", lambda args: calls.append(args) or 23)
+    assert cli.main(argv) == 23
+    assert container_module.database_arguments(calls[0]) == argv
+
+
 @pytest.mark.parametrize("tty", [False, True])
 def test_host_run_preserves_flags_and_tty(host_runtime, docker_calls, monkeypatch, tty):
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: tty)

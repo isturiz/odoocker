@@ -126,6 +126,42 @@ def run_odoo(*, install=None, update=None, stop=False):
         return run_command(args, check=False).returncode
 
 
+def database_arguments(args):
+    if args.command == "passwd":
+        result = ["passwd"]
+        if args.login is not None:
+            result.extend(["--login", args.login])
+        if args.password_stdin:
+            result.append("--password-stdin")
+    else:
+        result = ["db", args.database_command]
+        if args.database_command == "list":
+            if args.json:
+                result.append("--json")
+        else:
+            result.append(args.database)
+            if args.dry_run:
+                result.append("--dry-run")
+            if args.yes:
+                result.append("--yes")
+    return result
+
+
+def database_command(args):
+    # psycopg2 and Odoo belong to the Linux virtualenv, not the engine interpreter.
+    if not Path(PYTHON).is_file():
+        raise OdxError("Linux dependencies are not installed; run odx deps")
+    return run_command(
+        [PYTHON, "-m", "odoocker.database", *database_arguments(args)], check=False
+    ).returncode
+
+
+def open_shell():
+    # Shells share the environment and keep maintenance/deps from replacing it.
+    with locked(STATE / "environment.lock", shared=True):
+        return run_command(["/bin/bash"], check=False).returncode
+
+
 @contextmanager
 def test_port():
     """Coordinate port selection between managed tests in this container namespace."""

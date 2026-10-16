@@ -90,6 +90,14 @@ def parser():
     )
     db = commands.add_parser("db", help="Development database maintenance")
     databases = db.add_subparsers(dest="database_command", required=True)
+    listing = databases.add_parser("list", help="List this instance's databases and sizes")
+    listing.add_argument("--json", action="store_true", help="Print machine-readable inventory")
+    dropping = databases.add_parser("drop", help="Delete one exact database and its filestore")
+    dropping.add_argument("database", help="Exact database name; no patterns or bulk selectors")
+    dropping.add_argument("--dry-run", action="store_true", help="Inspect without deleting")
+    dropping.add_argument(
+        "--yes", action="store_true", help="Explicitly skip interactive confirmation"
+    )
     restore = databases.add_parser(
         "restore", help="Restore a trusted Odoo SQL ZIP into dev, with neutralization"
     )
@@ -122,6 +130,19 @@ def parser():
         action="store_true",
         help="Explicitly replace dev, retaining the previous database and filestore",
     )
+    passwd = commands.add_parser("passwd", help="Change an Odoo user's password in dev")
+    passwd.add_argument(
+        "--login", help="Exact login; defaults to base.user_admin, not a numeric ID"
+    )
+    passwd.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Read the new password from stdin, not arguments",
+    )
+    shell = commands.add_parser("sh", help="Open a terminal in one explicitly selected service")
+    shell.add_argument("service", choices=["odoo", "pg", "opencode"])
+    shell.add_argument("--psql", action="store_true", help="With pg, open psql connected to dev")
+    commands.add_parser("_shell", help=argparse.SUPPRESS)
     code = commands.add_parser("code", help="Open a supported coding assistant")
     assistants = code.add_subparsers(dest="assistant", required=True)
     oc = assistants.add_parser(
@@ -174,6 +195,9 @@ def init_workspace(args):
             "- `odx test --module <technical_name>`: fresh test DB and filestore per run.\n"
             "- `odx test --module <name> --tags <tags>`: scope tests explicitly.\n"
             "- Tests retain logs/results; `--keep` also preserves DB and filestore.\n"
+            "- `odx db list`: inspect databases; `db drop NAME --dry-run`: preview deletion.\n"
+            "- `db drop NAME --yes` deletes that DB and filestore; stop managed work first.\n"
+            "- `odx passwd`: change a dev user's password; never pass passwords as arguments.\n"
             "- `odx run` uses the development DB; do not use it for tests.\n"
             "- Worktrees isolate files, not databases or external addon checkouts.\n"
             "- Do not change dependencies while another agent is using the environment.\n"
@@ -260,9 +284,18 @@ def in_container(args):
         )
     if args.command == "test":
         return container.run_tests(args.module, tags=args.tags, keep=args.keep)
+    if args.command == "passwd" or (
+        args.command == "db" and args.database_command in ("list", "drop")
+    ):
+        return container.database_command(args)
+    if args.command == "_shell":
+        return container.open_shell()
     if args.command == "_serve":
         return container.serve_opencode()
-    raise OdxError(f"{args.command} is a host command; agents can use status, deps, run, test")
+    raise OdxError(
+        f"{args.command} is a host command; agents can use "
+        "status, deps, run, test, db list/drop, passwd"
+    )
 
 
 def _status(runtime, as_json=False):
@@ -319,10 +352,37 @@ def host(args):
         print("Source version checked; live worktree and PDF support still require validation.")
         return 0
     runtime = Runtime.load(workspace, args.instance)
-    if args.command == "db":
+    if args.command == "db" and args.database_command == "restore":
         from .restore.host import restore
 
         return restore(runtime, args)
+    if args.command == "passwd" or args.command == "db":
+        from .container import database_arguments
+
+        command = ["exec", *([] if sys.stdin.isatty() else ["-T"]), "odoo", "odx"]
+        command.extend(database_arguments(args))
+        with locked(runtime.operation_lock):
+            return runtime.compose(*command, check=False).returncode
+    if args.command == "sh":
+        if args.psql and args.service != "pg":
+            raise OdxError("--psql is only supported with odx sh pg")
+        service = "db" if args.service == "pg" else args.service
+        program = (
+            ["psql", "-X", "-U", "odoo", "--dbname=dev"]
+            if args.psql
+            else ["sh"]
+            if service == "db"
+            else ["odx", "_shell"]
+        )
+        with locked(runtime.operation_lock):
+            return runtime.compose(
+                "exec",
+                *([] if sys.stdin.isatty() else ["-T"]),
+                *(["--user", "postgres"] if service == "db" else []),
+                service,
+                *program,
+                check=False,
+            ).returncode
     if args.command == "setup":
         from .setup import prepare
 
