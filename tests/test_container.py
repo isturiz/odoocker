@@ -114,6 +114,46 @@ def test_require_ready_accepts_current_dependencies(ready):
     assert container.require_ready() is None
 
 
+def test_conditional_dependencies_skip_valid_environment_without_installing(ready, capsys):
+    original = (container.STATE / "dependencies.json").read_bytes()
+    assert container.install_dependencies(only_if_needed=True) == 0
+    assert "Dependencies unchanged" in capsys.readouterr().out
+    assert (container.STATE / "dependencies.json").read_bytes() == original
+
+
+def test_setup_dependencies_use_the_held_external_environment_lease(ready):
+    with locked(container.STATE / "environment.lock"):
+        assert container.install_dependencies(environment_locked=True, only_if_needed=True) == 0
+        with (
+            pytest.raises(OdxError, match="Resource busy"),
+            locked(container.STATE / "environment.lock"),
+        ):
+            pytest.fail("external lease must remain held")
+
+
+def test_conditional_dependencies_still_reject_busy_lock(ready):
+    with locked(container.STATE / "environment.lock", shared=True):
+        with pytest.raises(OdxError, match="Resource busy"):
+            container.install_dependencies(only_if_needed=True)
+
+
+@pytest.mark.parametrize("corrupt", [False, True, "null", "[]", '"text"', "123"])
+def test_conditional_dependencies_reinstall_stale_or_corrupt_marker(ready, monkeypatch, corrupt):
+    if corrupt:
+        (container.STATE / "dependencies.json").write_text(
+            "not json" if corrupt is True else corrupt
+        )
+    else:
+        ready.requirement.write_text("example==2.0\n")
+    calls = []
+    monkeypatch.setattr(container, "run_command", lambda args, **kwargs: calls.append(args))
+    assert container.install_dependencies(only_if_needed=True) == 0
+    assert len(calls) == 2
+    assert calls[0][:3] == ["uv", "pip", "install"]
+    assert calls[1][:3] == ["uv", "pip", "check"]
+    container.require_ready()
+
+
 def test_require_ready_rejects_changed_requirements(ready):
     ready.requirement.write_text("example==2.0\n")
     with pytest.raises(OdxError, match="Dependency declarations changed"):

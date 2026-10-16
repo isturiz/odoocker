@@ -273,32 +273,8 @@ class Runtime:
         self.workspace.validate_sources()
         # The updater holds this lock across backup, generation and recreation.
         with nullcontext() if operation_locked else locked(self.operation_lock):
-            previous = self.directory / "context.json"
-            if previous.exists():
-                version = json.loads(previous.read_text()).get("version")
-                if version != self.workspace.odoo_version:
-                    raise OdxError(
-                        "Do not reuse an instance's database and environment across Odoo versions. "
-                        "Create another workspace or select a new --instance."
-                    )
-                old_major = json.loads(previous.read_text()).get("postgres_version", "16")
-                if old_major != self.workspace.postgres_version and not allow_database_switch:
-                    raise OdxError(
-                        f"PostgreSQL changes from {old_major} "
-                        f"to {self.workspace.postgres_version}. "
-                        "Stop this instance with odx down, then configure --allow-database-switch "
-                        "to select the other major's independent volume. No data is migrated or "
-                        "deleted; switching back reuses that major's existing volume."
-                    )
-            build = self.directory / "build"
-            build.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(PACKAGE / "runtime.Dockerfile", build / "runtime.Dockerfile")
-            shutil.copytree(
-                PACKAGE,
-                build / "odoocker",
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+            self.validate_instance(allow_database_switch=allow_database_switch)
+            self.prepare_build(self.directory / "build")
             addons = ["/opt/odoo/odoo/addons", "/opt/odoo/addons"]
             addons.extend(f"/opt/addons/{index}" for index in range(len(self.workspace.addons)))
             config = (
@@ -345,6 +321,35 @@ class Runtime:
                 self.compose_file, json.dumps(_literals(self.compose_document()), indent=2)
             )
 
+    def validate_instance(self, *, allow_database_switch=False):
+        previous = self.directory / "context.json"
+        if previous.exists():
+            context = json.loads(previous.read_text())
+            if context.get("version") != self.workspace.odoo_version:
+                raise OdxError(
+                    "Do not reuse an instance's database and environment across Odoo versions. "
+                    "Create another workspace or select a new --instance."
+                )
+            old_major = context.get("postgres_version", "16")
+            if old_major != self.workspace.postgres_version and not allow_database_switch:
+                raise OdxError(
+                    f"PostgreSQL changes from {old_major} to {self.workspace.postgres_version}. "
+                    "Stop this instance with odx down, then configure --allow-database-switch "
+                    "to select the other major's independent volume. No data is migrated or "
+                    "deleted; switching back reuses that major's existing volume."
+                )
+
+    def prepare_build(self, directory):
+        """Stage the engine without replacing config files mounted by running services."""
+        directory.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PACKAGE / "runtime.Dockerfile", directory / "runtime.Dockerfile")
+        shutil.copytree(
+            PACKAGE,
+            directory / "odoocker",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+
     def compose(self, *args, capture=False, check=True):
         if not self.compose_file.exists():
             raise OdxError("Runtime is not generated; run odx configure first")
@@ -359,7 +364,7 @@ class Runtime:
             self.compose_args(*args), capture=capture, check=check, env=compose_env()
         )
 
-    def compose_args(self, *args, file=None):
+    def compose_args(self, *args, file=None, env_file=None):
         """Also used for the updater's generated, explicitly scoped maintenance file."""
         return [
             "docker",
@@ -367,7 +372,7 @@ class Runtime:
             "--project-directory",
             str(self.directory),
             "--env-file",
-            str(self.directory / "compose.env"),
+            str(env_file or self.directory / "compose.env"),
             "--project-name",
             self.project,
             "--file",

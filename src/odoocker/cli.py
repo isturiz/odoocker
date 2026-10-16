@@ -59,6 +59,10 @@ def parser():
     status = commands.add_parser("status", help="Show instance context and running services")
     status.add_argument("--json", action="store_true")
     commands.add_parser("doctor", help="Read-only diagnostics for this workspace")
+    setup = commands.add_parser("setup", help="Configure, prepare services and install needed deps")
+    setup.add_argument(
+        "--code", action="store_true", help="Also prepare the pinned OpenCode server"
+    )
     commands.add_parser(
         "deps", help="Install Linux Odoo/addon requirements under an exclusive lock"
     )
@@ -133,7 +137,7 @@ def init_workspace(args):
             "- Do not manage Docker or replace native OpenCode worktree management.\n"
         ),
     )
-    print(f"Created {root}\nNext: cd {root}; then odx fetch, odx up, odx deps")
+    print(f"Created {root}\nNext: cd {root}; then odx fetch and odx setup --code")
     return 0
 
 
@@ -260,6 +264,11 @@ def host(args):
         print("Source version checked; live worktree and PDF support still require validation.")
         return 0
     runtime = Runtime.load(workspace, args.instance)
+    if args.command == "setup":
+        from .setup import prepare
+
+        prepare(runtime, code=args.code)
+        return _status(runtime)
     if args.command == "configure":
         if args.allow_database_switch and runtime.compose_file.exists():
             running = runtime.compose("ps", "--status", "running", "--quiet", capture=True)

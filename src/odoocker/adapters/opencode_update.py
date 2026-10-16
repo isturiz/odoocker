@@ -3,8 +3,6 @@
 import hashlib
 import json
 import re
-import select
-import subprocess
 import sys
 import tomllib
 import uuid
@@ -14,6 +12,8 @@ from dataclasses import replace
 from ..config import MANIFEST, VERSION, Workspace
 from ..errors import OdxError
 from ..locking import locked
+from ..maintenance import Maintenance as Maintenance
+from ..maintenance import maintenance_process
 from ..runtime import _literals, compose_env, run_command, write_private
 from . import opencode
 
@@ -170,24 +170,6 @@ def active_sessions(runtime):
         raise OdxError("OpenCode has active sessions; finish/interrupt them before updating")
 
 
-class Maintenance:
-    def __init__(self, process):
-        self.process = process
-        self.stopped = False
-
-    def expect(self, status, timeout=60):
-        if not select.select([self.process.stdout], [], [], timeout)[0]:
-            raise OdxError("Timed out waiting for the update maintenance container")
-        line = self.process.stdout.readline()
-        if line.strip() != "ODX_UPDATE " + json.dumps({"status": status}):
-            raise OdxError("Maintenance lock/backup failed; an Odoo operation may be active")
-
-    def backup(self):
-        self.process.stdin.write("backup\n")
-        self.process.stdin.flush()
-        self.expect("backed_up", timeout=300)
-
-
 @contextmanager
 def maintenance(runtime, saved, directory):
     services = saved["services"]
@@ -248,19 +230,13 @@ def maintenance(runtime, saved, directory):
     }
     file = directory / "maintenance.compose.json"
     write_private(file, json.dumps(_literals(document)))
-    process = subprocess.Popen(
-        runtime.compose_args(
-            "run", "--rm", "--no-deps", "--pull", "never", "-T", "guard", file=file
-        ),
-        env={**compose_env(), "COMPOSE_IGNORE_ORPHANS": "true"},
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
+    args = runtime.compose_args(
+        "run", "--rm", "--no-deps", "--pull", "never", "-T", "guard", file=file
     )
-    try:
-        guard = Maintenance(process)
+    with maintenance_process(
+        args, env={**compose_env(), "COMPOSE_IGNORE_ORPHANS": "true"}
+    ) as guard:
         guard.image = images[0]
-        guard.expect("locked")
         try:
             yield guard
         except BaseException:
@@ -273,21 +249,6 @@ def maintenance(runtime, saved, directory):
                         "Could not confirm services stopped; inspect odx status.", file=sys.stderr
                     )
             raise
-    finally:
-        try:
-            process.stdin.close()
-        except BrokenPipeError:
-            pass
-        try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        process.stdout.close()
 
 
 def update(runtime):

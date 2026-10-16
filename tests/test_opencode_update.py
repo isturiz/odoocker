@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from odoocker import cli
+from odoocker import maintenance as maintenance_module
 from odoocker import runtime as runtime_module
 from odoocker.adapters import opencode
 from odoocker.adapters import opencode_update as updater
@@ -379,7 +380,7 @@ def test_maintenance_uses_external_readonly_volumes_and_stops_before_unlock(runt
             pytest.fail("must stop before releasing maintenance locks")
         calls.append(args)
 
-    monkeypatch.setattr(updater.subprocess, "Popen", start)
+    monkeypatch.setattr(maintenance_module.subprocess, "Popen", start)
     monkeypatch.setattr(updater, "saved_compose", stop)
     with pytest.raises(OdxError, match="fixture failure"):
         with updater.maintenance(runtime, updater.saved_configuration(runtime), directory) as guard:
@@ -395,10 +396,10 @@ def test_maintenance_rejects_busy_and_timeout_responses():
     process = SimpleNamespace(stdout=io.StringIO('ODX_UPDATE {"status": "busy"}\n'))
     # StringIO has no file descriptor; exercise the exact protocol with select mocked.
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(updater.select, "select", lambda *args: ([process.stdout], [], []))
+        patch.setattr(maintenance_module.select, "select", lambda *args: ([process.stdout], [], []))
         with pytest.raises(OdxError, match="Maintenance lock"):
             updater.Maintenance(process).expect("locked")
-        patch.setattr(updater.select, "select", lambda *args: ([], [], []))
+        patch.setattr(maintenance_module.select, "select", lambda *args: ([], [], []))
         with pytest.raises(OdxError, match="Timed out"):
             updater.Maintenance(process).expect("locked")
 
