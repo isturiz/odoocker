@@ -403,8 +403,8 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   the wheel in an isolated environment and verify the packaged restore modules and
   CLI options. Distribution is explicit: publishing the engine does not upgrade
   the installed/global CLI or recreate client containers automatically.
-- [ ] Integrated backup command, arbitrary/custom dump formats, automatic recovery-copy
-  cleanup, role mapping/privilege migration and full client functional/PDF/browser tests.
+- [ ] Integrated backup command, arbitrary/custom dump formats, cleanup of legacy/previous
+  recovery pairs, role mapping/privilege migration and full client functional/PDF/browser tests.
 
 ## Clean-volume client restore follow-up
 
@@ -486,3 +486,26 @@ OpenCode. Do not automatically migrate or clean up existing environments.
 - Distribution for this delivery: publish on `main` and explicitly upgrade the host
   CLI from its existing Git origin; verify the installed revision and command help.
 - [ ] Deliberately prepare updated client containers after the host CLI upgrade.
+
+## Successful restore checkpoint retention
+
+- [x] Dispose of new restores' pre-update database/filestore checkpoints by default,
+  only after verified publication and successful host finalization. Add explicit
+  `--keep-checkpoints`, independently of `--keep-sql`, and retain both policies on retry.
+- [x] Keep failed/incomplete restore checkpoints, original ZIPs, `dev`, previous
+  destinations preserved by `--replace`, logs and other operations' resources.
+  Legacy operations retain their existing checkpoint policy, including on resume.
+- [x] Record the import checkpoint's native database OID and filestore inode before
+  copying/updating. Reject mismatched/overlapping identities, unsafe paths, foreign-owned
+  or connected databases and busy native environment/database leases; never FORCE drops.
+- [x] Journal cleanup separately from host summaries in private `checkpoint-cleanup.json`.
+  Reconcile interrupted drops, quarantines and partial filestore deletion on completed
+  `--resume`, without reimporting, overwriting an active worker's journal or stopping services.
+  Warn on housekeeping failure without marking the published restore as failed.
+- [x] 754 automated tests pass, covering default/explicit/legacy retention, finalization
+  ordering, identity and symlink guards, native leases and cleanup interruption/retry.
+- [x] Ruff lint/format and whitespace checks; source/wheel builds and packaged CLI
+  help/cleanup script checks pass.
+- [ ] Live Docker validation of new default checkpoint disposal and explicit retention.
+- No client services/data, old recovery pairs, original ZIPs or installed/global CLI
+  were changed. Adoption/publication remains explicit.

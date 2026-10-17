@@ -335,6 +335,7 @@ def test_schema_failure_retains_import_and_resume_updates_only_requested_modules
     pipeline.run()
     assert sum(event[0] == "import" for event in backend.events) == 1
     assert backend.identity(pipeline.record["temporary"]) == baseline
+    assert pipeline.record["checkpoint_identity"] == baseline
     assert ("upgrade", "odx_update_" + "a" * 32, ["addon"]) in backend.events
     assert json.loads((pipeline.directory / "access.json").read_text()) == {
         "login": "unchanged-login",
@@ -392,4 +393,23 @@ def test_changed_target_is_not_silently_replaced(pipeline):
     pipeline.backend.create("dev")
     pipeline.backend.fail = None
     with pytest.raises(OdxError, match="identity changed"):
+        pipeline.run()
+
+
+def test_interrupted_checkpoint_creation_refuses_changed_import_identity(pipeline, monkeypatch):
+    original = pipeline.backend.ddl
+
+    def interrupt(*args):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(pipeline.backend, "ddl", interrupt)
+    pipeline.backend.gaps = [{"modules": ["addon"]}]
+    pipeline.record["options"]["update_outdated"] = True
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.run()
+    assert pipeline.record["checkpoint_started"]
+    assert not pipeline.record.get("checkpoint_ready")
+    pipeline.backend.databases[pipeline.record["temporary"]] += 1
+    monkeypatch.setattr(pipeline.backend, "ddl", original)
+    with pytest.raises(OdxError, match="Import checkpoint changed"):
         pipeline.run()

@@ -64,6 +64,7 @@ with psycopg2.connect(host=o['db_host'],user=o['db_user'],
 """
 
 CLEANUP_SQL = (PACKAGE / "restore/cleanup.py").read_text()
+CLEANUP_CHECKPOINTS = (PACKAGE / "restore/checkpoints.py").read_text()
 
 
 def topology(runtime):
@@ -132,7 +133,15 @@ def options(args, previous=None):
         }
     )
     result.setdefault("keep_sql", False)
-    for key in ("create_missing_roles", "reset_admin_password", "replace", "keep_sql"):
+    # Old operations promised retained recovery pairs. Never opt them into deletion.
+    result.setdefault("keep_checkpoints", previous is not None)
+    for key in (
+        "create_missing_roles",
+        "reset_admin_password",
+        "replace",
+        "keep_sql",
+        "keep_checkpoints",
+    ):
         if getattr(args, key):
             result[key] = True
     if args.update_outdated:
@@ -176,6 +185,49 @@ def cleanup_sql(runtime, directory, record):
             file=sys.stderr,
         )
     write_private(directory / "result.json", json.dumps(record, indent=2))
+
+
+def cleanup_checkpoints(runtime, directory, record):
+    if record["options"].get("keep_checkpoints", True):
+        return
+    if record.get("checkpoint_cleanup", {}).get("status") == "completed":
+        return
+    container_directory = "/workspace/" + directory.relative_to(runtime.workspace.root).as_posix()
+    try:
+        result = run_command(
+            runtime.compose_args(
+                "exec",
+                "-T",
+                "odoo",
+                "/opt/venv/bin/python",
+                "-c",
+                CLEANUP_CHECKPOINTS,
+                container_directory,
+            ),
+            env=compose_env(),
+            capture=True,
+        )
+        record["checkpoint_cleanup"] = json.loads(result.stdout)
+    except (OdxError, OSError, ValueError) as error:
+        # The container journals each destructive step. Keep that progress on failure.
+        # A disconnected exec may still hold the native lease. Its dedicated
+        # journal must never be overwritten by this host-side summary.
+        try:
+            progress = json.loads((directory / "checkpoint-cleanup.json").read_text())
+        except (OSError, ValueError):
+            progress = {}
+        progress.update(status="pending", error=type(error).__name__)
+        record["checkpoint_cleanup"] = progress
+        print(
+            "WARNING: dev is restored, but checkpoint cleanup is pending; "
+            "retry with --resume " + record["id"],
+            file=sys.stderr,
+        )
+    write_private(directory / "result.json", json.dumps(record, indent=2))
+    if record["checkpoint_cleanup"].get("status") == "completed" and record[
+        "checkpoint_cleanup"
+    ].get("database_removed"):
+        print("Restore update checkpoint and its filestore removed.")
 
 
 def document(runtime, saved, directory, image, database_image, record):
@@ -296,12 +348,14 @@ def restore(runtime, args):
             changed = options(args, record["options"])
             if record.get("publication_started") and changed != {
                 "keep_sql": False,
+                "keep_checkpoints": True,
                 **record["options"],
             }:
                 raise OdxError("Publication has begun; resume without changing restore options")
             record["options"] = changed
             if record.get("status") == "completed" and record.get("host_finalized"):
                 cleanup_sql(runtime, directory, record)
+                cleanup_checkpoints(runtime, directory, record)
                 print(f"Restore already completed: {directory}")
                 return 0
         else:
@@ -534,6 +588,7 @@ def restore(runtime, args):
         record["host_finalized"] = True
         save()
         cleanup_sql(runtime, directory, record)
+        cleanup_checkpoints(runtime, directory, record)
         print(f"Restored dev; {record['verified_attachments']} attachments verified. Run odx run.")
         print(f"Local access details: {directory / 'access.json'}")
         return 0

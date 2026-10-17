@@ -38,11 +38,15 @@ class Pipeline:
         source = record["temporary"]
         target = "odx_update_" + record["id"]
         backend.idle([source, target])
+        identity = backend.identity(source)
         if not record.get("checkpoint_started"):
             if any(backend.identity(target).values()):
                 raise OdxError("Checkpoint name collision; no database or files replaced")
+            record["checkpoint_identity"] = identity
             record["checkpoint_started"] = True
             self.save("checkpointing")
+        if record.get("checkpoint_identity", identity) != identity:
+            raise OdxError("Import checkpoint changed; all recovery copies retained")
         if not backend.identity(target)["database"]:
             backend.ddl("CREATE DATABASE {} WITH TEMPLATE {}", target, source)
         elif not backend.receipt(target):

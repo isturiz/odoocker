@@ -52,6 +52,7 @@ def args(backup=None, **kwargs):
         update=None,
         replace=False,
         keep_sql=False,
+        keep_checkpoints=False,
     )
     values.update(kwargs)
     return SimpleNamespace(**values)
@@ -113,6 +114,13 @@ def processes(runtime, monkeypatch):
             )
         elif action[0] == "exec" and host.CLEANUP_SQL in action:
             output = json.dumps({"status": "removed", "bytes": 42})
+        elif action[0] == "exec" and host.CLEANUP_CHECKPOINTS in action:
+            from pathlib import Path
+
+            directory = runtime.workspace.root / Path(action[-1]).relative_to("/workspace")
+            record = json.loads((directory / "result.json").read_text())
+            assert record["host_finalized"] and record["status"] == "completed"
+            output = json.dumps({"status": "completed", "database_removed": True})
         elif action[0] == "up" and action[-1] == "restore-worker":
             assert state.leased
             document = json.loads(open(file).read())
@@ -157,11 +165,15 @@ def test_cli_restore_flags_and_host_only_dispatch(monkeypatch):
             "--update-outdated",
             "--replace",
             "--keep-sql",
+            "--keep-checkpoints",
         ]
     )
     assert parsed.database_command == "restore"
     assert parsed.create_missing_roles and parsed.reset_admin_password and parsed.update_outdated
     assert parsed.keep_sql
+    assert parsed.keep_checkpoints
+    defaults = cli.parser().parse_args(["db", "restore", "backup.zip"])
+    assert not defaults.keep_sql and not defaults.keep_checkpoints
     monkeypatch.setenv("ODOOCKER_CONTAINER", "1")
     assert cli.main(["db", "restore", "backup.zip"]) == 1
 
@@ -304,6 +316,7 @@ def test_keep_sql_prevents_cleanup_and_is_retained_on_resume(runtime, backup, pr
     state.failed = False
     host.restore(runtime, args(resume=record["id"]))
     assert not any(host.CLEANUP_SQL in c for c in calls)
+    assert any(host.CLEANUP_CHECKPOINTS in c for c in calls)
     assert host.options(args(), record["options"])["keep_sql"]
 
 
@@ -331,6 +344,7 @@ def test_failed_restore_or_finalization_does_not_clean_sql(
     with pytest.raises(OdxError):
         host.restore(runtime, args(backup))
     assert not any(host.CLEANUP_SQL in c for c in calls)
+    assert not any(host.CLEANUP_CHECKPOINTS in c for c in calls)
 
 
 def test_cleanup_failure_warns_without_failing_dev_and_resume_retries_only_cleanup(
@@ -376,8 +390,88 @@ def test_legacy_completed_resume_can_clean_sql_without_changing_publication_opti
     record = json.loads((directory / "result.json").read_text())
     record.pop("sql_cleanup")
     record["options"].pop("keep_sql")
+    record["options"].pop("keep_checkpoints")
+    record.pop("checkpoint_cleanup")
     record["publication_started"] = True
     (directory / "result.json").write_text(json.dumps(record))
     calls.clear()
     assert host.restore(runtime, args(resume=record["id"])) == 0
     assert len(calls) == 1 and host.CLEANUP_SQL in calls[0]
+
+
+def test_checkpoint_cleanup_follows_sql_and_finalization(runtime, backup, processes):
+    calls, state = processes
+    host.restore(runtime, args(backup))
+    finalize = next(i for i, c in enumerate(calls) if host.FINALIZE in c)
+    sql = next(i for i, c in enumerate(calls) if host.CLEANUP_SQL in c)
+    checkpoints = next(i for i, c in enumerate(calls) if host.CLEANUP_CHECKPOINTS in c)
+    assert finalize < sql < checkpoints
+
+
+def test_keep_checkpoints_survives_failure_and_resume_independently_of_sql(
+    runtime,
+    backup,
+    processes,
+):
+    calls, state = processes
+    state.failed = True
+    with pytest.raises(OdxError):
+        host.restore(runtime, args(backup, keep_checkpoints=True))
+    record = json.loads(next((runtime.directory / "restores").glob("*/result.json")).read_text())
+    state.failed = False
+    host.restore(runtime, args(resume=record["id"]))
+    assert not any(host.CLEANUP_CHECKPOINTS in c for c in calls)
+    assert any(host.CLEANUP_SQL in c for c in calls)
+    assert host.options(args(), record["options"])["keep_checkpoints"]
+
+
+def test_checkpoint_cleanup_failure_keeps_journal_and_resume_only_retries_cleanup(
+    runtime,
+    backup,
+    processes,
+    monkeypatch,
+    capsys,
+):
+    calls, state = processes
+    original = host.run_command
+
+    def run(command, **kwargs):
+        if host.CLEANUP_CHECKPOINTS in command:
+            path = next((runtime.directory / "restores").glob("*/result.json"))
+            (path.parent / "checkpoint-cleanup.json").write_text(
+                json.dumps({"database_removed": True, "removal_started": True})
+            )
+            raise OdxError("injected partial cleanup failure")
+        return original(command, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(host, "run_command", run)
+        assert host.restore(runtime, args(backup)) == 0
+    directory = next((runtime.directory / "restores").iterdir())
+    record = json.loads((directory / "result.json").read_text())
+    assert record["status"] == "completed" and record["host_finalized"]
+    assert record["checkpoint_cleanup"]["status"] == "pending"
+    assert record["checkpoint_cleanup"]["database_removed"]
+    assert record["checkpoint_cleanup"]["removal_started"]
+    assert "checkpoint cleanup is pending" in capsys.readouterr().err
+    calls.clear()
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert len(calls) == 1 and host.CLEANUP_CHECKPOINTS in calls[0]
+    calls.clear()
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert not calls
+
+
+def test_legacy_options_keep_checkpoints_without_changing_new_restore_default():
+    assert not host.options(args())["keep_checkpoints"]
+    assert host.options(args(), {"keep_sql": False})["keep_checkpoints"]
+
+
+def test_checkpoint_retention_cannot_change_after_publication(runtime, backup, processes):
+    host.restore(runtime, args(backup))
+    result = next((runtime.directory / "restores").glob("*/result.json"))
+    record = json.loads(result.read_text())
+    record["publication_started"] = True
+    result.write_text(json.dumps(record))
+    with pytest.raises(OdxError, match="Publication has begun"):
+        host.restore(runtime, args(resume=record["id"], keep_checkpoints=True))

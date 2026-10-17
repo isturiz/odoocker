@@ -18,7 +18,9 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 - `adapters/opencode.py`: OpenCode-specific connection behavior.
 - `container.py`: in-container Odoo commands; no Docker access required.
 - `restore/`: host-scoped maintenance, offline workers and durable restore checkpoints;
-  never publish an unverified DB/filestore pair or implicitly delete recovery copies.
+  never publish an unverified DB/filestore pair. New restores dispose of their own
+  update checkpoints only after successful host finalization, unless `--keep-checkpoints`;
+  preserve unfinished/legacy recovery pairs and previous destinations from `--replace`.
 - `odoo_compat.py`: inspect native API capabilities, not release-number branches.
   Validated releases are informational; retain backup/workspace version and downgrade guards.
 - OpenCode owns its native worktrees. Do not implement a competing Git manager.

@@ -365,7 +365,7 @@ trusted backups: SQL and installed addon code are executable, not a safe format 
 untrusted input. **This is development-only and performs no Odoo migration or
 PostgreSQL downgrade.** It does not fetch or switch addon branches.
 
-Defaults are conservative:
+Restore behavior and options:
 
 - Target is the selected instance's `dev`. An existing DB or filestore is rejected;
   `--replace` explicitly preserves the old pair under a generated recovery name.
@@ -385,6 +385,11 @@ Defaults are conservative:
   specific installed modules instead. The two modes are mutually exclusive;
   neither accepts `all`, installs arbitrary modules or permits a selected downgrade.
   Odoo may also update/install required dependencies according to its native rules.
+- After a successfully finalized restore, its pre-update DB/filestore checkpoint
+  is deleted automatically. Use `--keep-checkpoints` to retain that recovery pair
+  explicitly. This does not affect the original ZIP, `dev`, logs, or a previous
+  destination preserved by `--replace`. Failed/incomplete restores retain their
+  checkpoints; older operations without this retention policy also keep them on resume.
 - After a successfully finalized restore, the extracted `dump.sql` is deleted
   automatically. Use `--keep-sql` to retain it explicitly. Failed or incomplete
   restores always keep the SQL for diagnosis and resumption. The original ZIP is
@@ -412,7 +417,8 @@ even if the host controller disappears; arbitrary external Docker operations rem
 outside the locking protocol. Never run two PostgreSQL processes on the same volume.
 
 Restoration happens in a generated staging DB and filestore. Before upgrades,
-another DB/filestore checkpoint preserves the first imported copy. Native module
+another DB/filestore checkpoint preserves the first imported copy until successful
+host finalization (or longer with `--keep-checkpoints`). Native module
 neutralization runs before registry hooks and again after upgrades/preparation;
 all cron jobs and real mail servers must remain disabled across a fresh registry
 load. Unknown integration behavior is not automatically neutralized: client addons
@@ -537,14 +543,21 @@ private logs, an engine snapshot, generated maintenance configuration and
 `access.json`. The latter records the unchanged administrator login and current URL;
 its password is `null` when the restored password was preserved. These files include
 password hashes, copy secrets and potentially client data: **never commit or share
-them**. Extracted data, update checkpoints, previous DB/filestore pairs, created roles
-and the private socket volume are retained, except for the disposable SQL after
-success (unless `--keep-sql` was selected). SQL cleanup never removes a recovery DB
-or filestore. If cleanup fails, the command warns without treating the restored
-`dev` as failed; `--resume <id>` retries only that cleanup on a finalized operation,
-including an older completed operation that still has its SQL. Roles belong to
-the instance's cluster and can remain even if the import fails; role creation
-attempts/commit status are recorded. Budget disk space for the extracted SQL plus
+them**. Disposable SQL and the pre-update checkpoint are removed after success,
+unless `--keep-sql` and `--keep-checkpoints`, respectively, were selected. These
+independent retention options persist across retries. Previous DB/filestore pairs
+from `--replace`, small extraction metadata, logs, created roles and the private
+socket volume are retained. If cleanup fails, the command warns without treating
+the restored `dev` as failed; `--resume <id>` retries pending cleanup only on a
+finalized operation, without reimporting or stopping services. Checkpoint disposal
+holds exclusive native leases, verifies recorded database OIDs/filestore inodes,
+and journals partial deletion in `checkpoint-cleanup.json` for safe retry. It never
+terminates database clients or deletes another operation's recovery pairs. Older
+operations retain their checkpoints; their disposable SQL can still be cleaned on
+explicit resume. Finish managed Odoo operations before retrying checkpoint cleanup;
+an occupied environment/database lease leaves it pending without interrupting work.
+Roles belong to the instance's cluster and can remain even if the import fails;
+role creation attempts/commit status are recorded. Budget disk space for the extracted SQL plus
 DB/filestore checkpoints and PostgreSQL temporary/WAL space.
 
 On failure, normal PostgreSQL and the idle Odoo support container are recovered
@@ -620,8 +633,8 @@ there is no automatic garbage collector yet. Do not use `down` during active ope
   applied by running `deps` explicitly.
 - PostgreSQL is not exposed to the host. The included client matches the server's
   major version (16/18). Restore supports trusted native Odoo SQL ZIPs; an integrated
-  backup command, custom-format imports and automatic recovery-copy cleanup remain
-  pending.
+  backup command, custom-format imports and cleanup of older/previous-destination
+  copies remain pending.
 - The image uses UID/GID 1000. On Linux, editable directories must allow that user
   to write; configurable UID/GID is still pending.
 - Model credentials are configured on the new server with `/connect`;
@@ -638,7 +651,8 @@ uv run odx --workspace ../workspaces/my-client down
 ```
 
 `down` removes **this instance's** containers and network, preserving all its
-volumes. There is no global deletion command or automatic data cleanup.
+volumes. There is no global deletion command or volume cleanup; successful restores
+only dispose of their own temporary SQL and pre-update checkpoint by default.
 
 ## Engine development
 
