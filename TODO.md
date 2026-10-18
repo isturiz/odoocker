@@ -509,3 +509,21 @@ OpenCode. Do not automatically migrate or clean up existing environments.
 - [ ] Live Docker validation of new default checkpoint disposal and explicit retention.
 - No client services/data, old recovery pairs, original ZIPs or installed/global CLI
   were changed. Adoption/publication remains explicit.
+
+## Configurable Odoo web database manager
+
+- [x] Accept strictly typed `odoo.options.list_db` and validated single-line
+  `dbfilter` expressions; retain disabled-by-default and `^dev$` behavior.
+- [x] Generate an independent private master password on first enablement, preserve
+  it per instance across regeneration/toggles, and keep existing credentials intact.
+- [x] Preserve the primary `dev` target, managed connection/paths and localhost-only
+  application ports. Document explicit adoption and browser operations' lack of
+  maintenance leases, checkpoint protection, restore verification and neutralization.
+- [x] Accept the manifest's HTTP filter in restore topology checks without weakening
+  the fixed restore destination or accepting undeclared generated configuration changes.
+- [x] 806 automated tests pass (`uv run pytest`); Ruff lint/format and whitespace
+  checks pass. Coverage includes option types/injection, legacy credentials, secret
+  stability/isolation, disabled defaults and restores with configured HTTP filters.
+- [ ] Live Docker validation of enabled manager and HTTP selection of development copies.
+- No installed/global engine update, client configuration changes, service operations
+  or database changes are part of this delivery; adoption remains user-managed.

@@ -265,6 +265,77 @@ def test_regeneration_preserves_identity_secrets_and_document(runtime):
     assert loaded.compose_file.read_bytes() == original
 
 
+@pytest.mark.parametrize("dbfilter", [None, "^(dev|sandbox_[a-z0-9_]+)$", "^%d$"])
+def test_database_manager_is_opt_in_with_private_master_password(runtime, dbfilter):
+    options = {"list_db": True}
+    if dbfilter is not None:
+        options["dbfilter"] = dbfilter
+    enabled = Runtime.load(replace(runtime.workspace, odoo_options=options))
+    enabled.generate()
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(enabled.directory / "odoo.conf")
+    assert config["options"].getboolean("list_db")
+    assert config["options"]["dbfilter"] == (dbfilter if dbfilter is not None else "^dev$")
+    assert config["options"]["db_name"] == "dev"
+    assert config["options"]["admin_passwd"] == enabled.admin_password
+    assert enabled.admin_password != runtime.password
+    assert len(enabled.admin_password) >= 32
+    credentials = json.loads((enabled.directory / "secrets.json").read_text())
+    assert credentials == {"password": runtime.password, "admin_password": enabled.admin_password}
+    assert enabled.password == runtime.password
+    assert enabled.identity == runtime.identity
+    assert enabled.admin_password not in enabled.compose_file.read_text()
+    assert enabled.admin_password not in (enabled.directory / "context.json").read_text()
+    assert enabled.compose_document()["services"]["odoo"]["ports"] == [
+        {"target": 8069, "host_ip": "127.0.0.1"}
+    ]
+    assert stat.S_IMODE((enabled.directory / "secrets.json").stat().st_mode) == 0o600
+    original = (enabled.directory / "odoo.conf").read_bytes()
+    reloaded = Runtime.load(enabled.workspace)
+    reloaded.generate()
+    assert reloaded.admin_password == enabled.admin_password
+    assert (reloaded.directory / "odoo.conf").read_bytes() == original
+
+
+def test_database_manager_secret_survives_disable_and_reenable(runtime):
+    enabled_workspace = replace(runtime.workspace, odoo_options={"list_db": True})
+    enabled = Runtime.load(enabled_workspace)
+    enabled.generate()
+    disabled = Runtime.load(runtime.workspace)
+    disabled.generate()
+    config = configparser.ConfigParser()
+    config.read(disabled.directory / "odoo.conf")
+    assert not config["options"].getboolean("list_db")
+    assert config["options"]["admin_passwd"] == enabled.admin_password
+    assert Runtime.load(enabled_workspace).admin_password == enabled.admin_password
+
+
+def test_database_manager_secrets_are_instance_scoped(workspace):
+    workspace = replace(workspace, odoo_options={"list_db": True})
+    main = Runtime.load(workspace)
+    feature = Runtime.load(workspace, "feature")
+    assert main.admin_password != feature.admin_password
+    assert Runtime.load(workspace).admin_password == main.admin_password
+    assert Runtime.load(workspace, "feature").admin_password == feature.admin_password
+
+
+@pytest.mark.parametrize("secret", [None, "", False, 1, [], {}, "bad\nconfig", "bad%value"])
+def test_invalid_master_password_is_not_silently_replaced(runtime, secret):
+    path = runtime.directory / "secrets.json"
+    content = json.dumps({"password": runtime.password, "admin_password": secret})
+    path.write_text(content)
+    with pytest.raises(OdxError, match="Invalid database manager credentials"):
+        Runtime.load(replace(runtime.workspace, odoo_options={"list_db": True}))
+    assert path.read_text() == content
+
+
+def test_generate_refuses_uninitialized_manager_credentials(runtime):
+    changed = replace(runtime, workspace=replace(runtime.workspace, odoo_options={"list_db": True}))
+    with pytest.raises(OdxError, match="Database manager credentials are missing"):
+        changed.generate()
+    assert not runtime.compose_file.exists()
+
+
 @pytest.mark.parametrize("major", ["16", "18"])
 @pytest.mark.parametrize("vector", [False, True])
 def test_database_profiles_keep_major_specific_storage_and_client(runtime, major, vector):

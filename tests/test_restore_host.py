@@ -205,6 +205,28 @@ def test_host_restore_is_scoped_private_and_keeps_database_offline_until_worker_
     assert not any("down" in c or "--volumes" in c or "--build" in c for c in calls)
 
 
+@pytest.mark.parametrize("dbfilter", ["^dev$", "^(dev|sandbox_[a-z0-9_]+)$", "^%d$", ""])
+def test_restore_accepts_configured_manager_filter_without_retargeting_dev(
+    runtime, backup, processes, dbfilter
+):
+    manifest = runtime.workspace.root / MANIFEST
+    manifest.write_text(
+        manifest.read_text()
+        + f"\n[odoo.options]\nlist_db = true\ndbfilter = {json.dumps(dbfilter)}\n"
+    )
+    configured = Runtime.load(Workspace.load(runtime.workspace.root))
+    configured.generate()
+    assert host.restore(configured, args(backup)) == 0
+    assert configured.admin_password == Runtime.load(configured.workspace).admin_password
+
+
+def test_restore_rejects_filter_not_declared_in_manifest(runtime):
+    path = runtime.directory / "odoo.conf"
+    path.write_text(path.read_text().replace("dbfilter = ^dev$", "dbfilter = .*"))
+    with pytest.raises(OdxError, match="Generated database configuration changed"):
+        host.topology(runtime)
+
+
 @pytest.mark.parametrize("busy,active", [(True, False), (False, True)])
 def test_busy_or_active_sessions_do_not_stop_services(runtime, backup, processes, busy, active):
     calls, state = processes

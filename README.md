@@ -287,8 +287,9 @@ manager or an update operation.
 `odoo.requirements` lists workspace-relative files. `deps` resolves their
 dependencies together with those of core and addons, using Odoo's requirements
 as constraints. A declared file must exist; missing files are not ignored.
-`odoo.options` only accepts memory, time, and request limits; it does not allow
-overriding the PostgreSQL connection, ports, credentials, or managed paths.
+`odoo.options` accepts memory, time, and request limits, plus the database-manager
+options described below. It does not allow overriding the PostgreSQL connection,
+ports, credentials, managed paths, or the primary `dev` database.
 
 Private `odoocker.local.toml` file:
 
@@ -310,6 +311,54 @@ workspace and can be read by the agent.
 The CLI rejects unknown keys to catch configuration errors early.
 After changing the manifest, paths, or engine version, run `configure` and `up`
 to regenerate/recreate. Do not regenerate while another session is using the instance.
+
+### Odoo web database manager
+
+The web manager is **disabled by default** (`list_db = false`), and HTTP database
+selection is restricted to `dev` (`dbfilter = "^dev$"`). Enable it explicitly for
+development in the existing `[odoo.options]` table in `odoocker.toml`:
+
+```toml
+[odoo.options]
+list_db = true
+# Optional: allow dev plus deliberately named disposable development copies.
+dbfilter = "^(dev|sandbox_[a-z0-9_]+)$"
+```
+
+`list_db` must be a boolean; `dbfilter` must be a single-line regular expression.
+Odoo's `%h` and `%d` hostname substitutions are supported. Omitting the filter keeps
+`^dev$`; an empty filter falls back to Odoo's explicit primary database selection.
+Changing the filter alone does not enable the manager. Ports remain published only
+on `127.0.0.1`, and PostgreSQL is not published.
+
+After explicitly upgrading the engine, apply with no active operations or sessions:
+
+```sh
+odx down
+odx configure
+odx up --code # Omit --code if not using OpenCode.
+odx run
+```
+
+Use the Odoo URL reported by `odx status`, followed by `/web/database/manager`.
+On first enablement, the engine creates an independent random master password per
+instance in `.odoocker/instances/<instance>/secrets.json` (`admin_password`), and
+writes it as `admin_passwd` in the generated `odoo.conf`. Retrieve it privately from
+that file; do not commit it, put it in the manifest, or post it in logs. The password
+survives regeneration and disabling/re-enabling the manager. Existing PostgreSQL
+and OpenCode credentials are not rotated. The generated configuration is read-only
+inside Odoo: manage this secret on the host, not through the web password-change form.
+
+The primary database remains `dev`: `odx run --init/--update`, restores and `passwd`
+retain that target. An expanded HTTP filter permits selecting other matching
+databases in the browser; it does not retarget those CLI operations.
+
+**Web operations bypass odoocker's maintenance leases, checkpoint protections,
+restore verification and neutralization workflow.** Use the CLI for validated
+restores and recovery-copy management. Avoid broad filters such as `.*`: they can
+expose test/recovery databases to HTTP selection. Do not create, delete, duplicate
+or restore databases through the web while managed tests or maintenance are active.
+Development copies can still contain sensitive data and live integrations.
 
 ### PostgreSQL and pgvector
 

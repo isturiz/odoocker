@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -81,6 +82,7 @@ class Runtime:
     instance: str
     identity: str
     password: str
+    admin_password: str | None = None
 
     @classmethod
     def load(cls, workspace, instance="main"):
@@ -106,15 +108,27 @@ class Runtime:
             credentials = directory / "instances" / instance / "secrets.json"
             if credentials.exists():
                 try:
-                    password = json.loads(credentials.read_text())["password"]
+                    credential_data = json.loads(credentials.read_text())
+                    password = credential_data["password"]
                 except (ValueError, KeyError, TypeError) as error:
                     raise OdxError(f"Invalid credentials file: {credentials}") from error
                 if not isinstance(password, str) or not password:
                     raise OdxError(f"Empty instance credentials: {credentials}")
             else:
                 password = secrets.token_urlsafe(32)
-                write_private(credentials, json.dumps({"password": password}))
-        return cls(workspace, instance, identity, password)
+                credential_data = {"password": password}
+                write_private(credentials, json.dumps(credential_data))
+            admin_password = credential_data.get("admin_password")
+            if "admin_password" in credential_data and (
+                not isinstance(admin_password, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]+", admin_password)
+            ):
+                raise OdxError(f"Invalid database manager credentials: {credentials}")
+            if workspace.odoo_options.get("list_db", False) and admin_password is None:
+                admin_password = secrets.token_urlsafe(32)
+                credential_data["admin_password"] = admin_password
+                write_private(credentials, json.dumps(credential_data))
+        return cls(workspace, instance, identity, password, admin_password)
 
     @property
     def project(self):
@@ -277,20 +291,23 @@ class Runtime:
             self.prepare_build(self.directory / "build")
             addons = ["/opt/odoo/odoo/addons", "/opt/odoo/addons"]
             addons.extend(f"/opt/addons/{index}" for index in range(len(self.workspace.addons)))
+            options = {"dbfilter": "^dev$", "list_db": False, **self.workspace.odoo_options}
+            if options["list_db"] and not self.admin_password:
+                raise OdxError("Database manager credentials are missing; reload the instance")
+            if self.admin_password:
+                options["admin_passwd"] = self.admin_password
             config = (
                 "[options]\n"
                 "db_host = db\ndb_port = 5432\ndb_user = odoo\n"
                 f"db_password = {self.password}\n"
-                "db_name = dev\ndbfilter = ^dev$\n"
+                "db_name = dev\n"
                 "data_dir = /home/odoo/.local/share/Odoo\n"
                 f"addons_path = {','.join(addons)}\n"
                 "http_interface = 0.0.0.0\nhttp_port = 8069\n"
-                "workers = 0\nmax_cron_threads = 0\nlist_db = False\n"
+                "workers = 0\nmax_cron_threads = 0\n"
                 "unaccent = True\n"
             )
-            config += "".join(
-                f"{key} = {value}\n" for key, value in sorted(self.workspace.odoo_options.items())
-            )
+            config += "".join(f"{key} = {value}\n" for key, value in sorted(options.items()))
             # Config must be readable by UID 1000 inside Docker; directory stays private.
             for name, content in (
                 ("odoo.conf", config),

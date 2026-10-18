@@ -84,7 +84,7 @@ def topology(runtime):
             "db_user": "odoo",
             "db_password": runtime.password,
             "db_name": "dev",
-            "dbfilter": "^dev$",
+            "dbfilter": runtime.workspace.odoo_options.get("dbfilter", "^dev$"),
             "data_dir": "/home/odoo/.local/share/Odoo",
         }
         if any(config["options"].get(key) != value for key, value in required.items()):

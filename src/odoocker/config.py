@@ -21,6 +21,8 @@ ODOO_OPTIONS = {
     "limit_time_cpu",
     "limit_time_real",
     "limit_time_real_cron",
+    "list_db",
+    "dbfilter",
 }
 
 
@@ -149,7 +151,7 @@ class Workspace:
     addons: tuple[Path, ...] = ()
     repositories: tuple[Repository, ...] = ()
     requirement_files: tuple[Path, ...] = ()
-    odoo_options: dict[str, int] = field(default_factory=dict)
+    odoo_options: dict[str, int | bool | str] = field(default_factory=dict)
     postgres_version: str = "16"
     pgvector: bool = False
 
@@ -204,6 +206,22 @@ class Workspace:
         options = odoo.get("options", {})
         _keys(options, ODOO_OPTIONS, "odoo.options")
         for key, value in options.items():
+            if key == "list_db":
+                if type(value) is not bool:
+                    raise OdxError("odoo.options.list_db must be a boolean")
+                continue
+            if key == "dbfilter":
+                if not isinstance(value, str) or any(
+                    ord(char) < 32 or ord(char) == 127 for char in value
+                ):
+                    raise OdxError("odoo.options.dbfilter must be a single-line string")
+                try:
+                    re.compile(value)
+                except (re.error, OverflowError) as error:
+                    raise OdxError(
+                        "odoo.options.dbfilter must be a valid regular expression"
+                    ) from error
+                continue
             minimum = -1 if key == "limit_time_real_cron" else 0
             if type(value) is not int or value < minimum:
                 raise OdxError(f"odoo.options.{key} must be an integer >= {minimum}")

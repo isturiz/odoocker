@@ -43,6 +43,63 @@ def test_load_defaults(root):
     assert workspace.addons == ()
     assert workspace.postgres_version == "16"
     assert workspace.pgvector is False
+    assert workspace.odoo_options == {}
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("dbfilter", ["^dev$", "^(dev|sandbox_[a-z0-9_]+)$", "^%d$", ""])
+def test_database_manager_options(root, enabled, dbfilter):
+    (root / MANIFEST).write_text(
+        VALID_MANIFEST + "\n[odoo.options]\n"
+        f"list_db = {str(enabled).lower()}\ndbfilter = {json.dumps(dbfilter)}\n"
+        "limit_time_cpu = 60\n"
+    )
+    assert Workspace.load(root).odoo_options == {
+        "list_db": enabled,
+        "dbfilter": dbfilter,
+        "limit_time_cpu": 60,
+    }
+
+
+@pytest.mark.parametrize("value", ['"true"', "1", "0", "[]", "{}"])
+def test_database_manager_requires_boolean(root, value):
+    (root / MANIFEST).write_text(VALID_MANIFEST + f"\n[odoo.options]\nlist_db = {value}\n")
+    with pytest.raises(OdxError, match="list_db must be a boolean"):
+        Workspace.load(root)
+
+
+@pytest.mark.parametrize(
+    "value", ["true", "1", "[]", "{}", '"dev\\nlist_db = True"', '"dev\\r"', '"dev\\u0000"']
+)
+def test_database_filter_rejects_types_and_config_injection(root, value):
+    (root / MANIFEST).write_text(VALID_MANIFEST + f"\n[odoo.options]\ndbfilter = {value}\n")
+    with pytest.raises(OdxError, match="dbfilter must be a single-line string"):
+        Workspace.load(root)
+
+
+@pytest.mark.parametrize("pattern", ["[", "(", "*dev", "(?P<name>dev", "a{99999999999999999999}"])
+def test_database_filter_requires_valid_regex(root, pattern):
+    (root / MANIFEST).write_text(
+        VALID_MANIFEST + f"\n[odoo.options]\ndbfilter = {json.dumps(pattern)}\n"
+    )
+    with pytest.raises(OdxError, match="dbfilter must be a valid regular expression"):
+        Workspace.load(root)
+
+
+@pytest.mark.parametrize("key", ["admin_passwd", "db_name", "db_host", "db_user", "data_dir"])
+def test_manager_options_do_not_allow_managed_settings_or_secrets(root, key):
+    (root / MANIFEST).write_text(VALID_MANIFEST + f'\n[odoo.options]\n{key} = "override"\n')
+    with pytest.raises(OdxError, match=f"Unknown odoo.options keys: {key}"):
+        Workspace.load(root)
+
+
+@pytest.mark.parametrize("value", ["true", '"60"', "-1"])
+def test_limits_remain_strict_integers(root, value):
+    (root / MANIFEST).write_text(
+        VALID_MANIFEST + f"\n[odoo.options]\nlist_db = true\nlimit_time_cpu = {value}\n"
+    )
+    with pytest.raises(OdxError, match="limit_time_cpu must be an integer >= 0"):
+        Workspace.load(root)
 
 
 @pytest.mark.parametrize("major", ["16", "18"])
