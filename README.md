@@ -167,6 +167,61 @@ uv run odx --workspace ../workspaces/my-client run
 containers; Odoo only starts listening for HTTP with `run`. The services do not use
 fixed host ports 8069/4097/5432.
 
+### Stable browser URLs (optional)
+
+The engine can manage **one native Caddy process shared by all workspaces**.
+Install Caddy separately (on macOS, `brew install caddy`; on Linux, use Caddy's
+official installation instructions). No system service, root privileges, Docker
+socket, certificates, external DNS, or `/etc/hosts` changes are needed.
+
+```sh
+odx proxy start                 # Once per host session, from any directory
+cd /path/to/client
+odx proxy register              # Register an already-prepared running instance
+odx status                     # Includes odoo_proxy_url and the direct odoo_url
+```
+
+For a workspace named `client`, instance `main`, the stable URL is:
+
+```text
+http://client-main.localhost:8080
+```
+
+After the first `proxy start`, `up`, `setup`, and successful OpenCode updates
+automatically refresh the selected instance's Odoo route. `down` removes only that
+instance's route, not the shared proxy. Odoo still needs `odx run` to serve HTTP.
+Existing workspaces are not discovered or changed automatically: use `register`
+or their next normal startup. Instances keep separate hostnames and browser cookies.
+
+```sh
+odx --instance testing proxy register
+odx proxy status
+odx proxy stop                 # Stop only this proxy; preserve routes and opt-in
+odx proxy start                # Restart it, including after a host reboot
+odx proxy remove client-testing.localhost  # Remove one exact stale route
+```
+
+- Caddy listens only on `127.0.0.1`, HTTP, default port **8080**. Choose a different
+  unprivileged port on the first start with `--port 8088`; it stays fixed afterward.
+- State and private logs live under `${XDG_DATA_HOME:-~/.local/share}/odoocker/proxy/`.
+  Its admin API uses a Unix socket inside that private directory; an unrelated
+  Caddy service/profile is never stopped or reconfigured.
+- Names use `<workspace>-<instance>.localhost`, normalizing underscores to hyphens.
+  The combined DNS label must fit in 63 characters; collisions are rejected rather
+  than reassigned. Give simultaneous workspaces distinct names.
+- Route updates are locked across workspaces and Caddy reloads atomically. Proxy
+  failures produce warnings without hiding a successful Docker operation. Retry
+  with `proxy register`; direct access remains available when Caddy is unavailable.
+- Use `odx` for container recreation: external Docker changes do not refresh routes.
+  Remove routes for abandoned workspaces explicitly; there is no Docker discovery.
+- This first version proxies only Odoo, not the assistant or PostgreSQL. It preserves
+  the HTTP Host and supports WebSocket upgrades. It does not enable Odoo's
+  `proxy_mode`: HTTP scheme/host remain unchanged, with no TLS termination.
+
+Browsers normally resolve `*.localhost` to loopback. For command-line diagnostics
+on systems without that resolver behavior, use e.g.
+`curl --resolve client-main.localhost:8080:127.0.0.1 http://client-main.localhost:8080`.
+
 From the workspace, you can also invoke the engine without installing it globally:
 
 ```sh

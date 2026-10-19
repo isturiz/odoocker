@@ -15,8 +15,9 @@ from odoocker.runtime import Runtime
 
 
 @pytest.fixture(autouse=True)
-def no_external_processes(monkeypatch):
+def no_external_processes(monkeypatch, tmp_path):
     monkeypatch.delenv("ODOOCKER_CONTAINER", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
 
     def forbidden(*args, **kwargs):
         pytest.fail("Unit tests must not invoke an external process")
@@ -77,6 +78,22 @@ def test_only_explicit_opencode_assistant_is_accepted():
     assert args.command == "code"
     assert args.assistant == "opencode"
     assert args.args == ["--", "--model", "example/model"]
+
+
+@pytest.mark.parametrize("action", ["up", "down", "setup"])
+def test_cli_refreshes_proxy_after_managed_lifecycle(host_runtime, monkeypatch, action):
+    from odoocker import proxy, setup
+
+    calls = []
+    monkeypatch.setattr(proxy, "sync", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
+        returncode=0, stdout="[]"
+    ))
+    monkeypatch.setattr(setup, "prepare", lambda *a, **kw: None)
+    assert cli.main(host_args(host_runtime, action)) == 0
+    assert len(calls) == 1
+    assert calls[0][0][0].project == host_runtime.project
+    assert calls[0][1] == ({"remove": True} if action == "down" else {})
 
 
 @pytest.mark.parametrize("argv", [["code"], ["code", "claude"], ["code", "codex"], ["opencode"]])

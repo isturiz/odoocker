@@ -36,6 +36,15 @@ def parser():
         "--instance", default="main", help="Explicit runtime instance (default: main)"
     )
     commands = result.add_subparsers(dest="command", required=True)
+    proxy = commands.add_parser("proxy", help="Manage the optional shared local Caddy proxy")
+    proxies = proxy.add_subparsers(dest="proxy_command", required=True)
+    start = proxies.add_parser("start", help="Start Caddy and enable automatic Odoo routes")
+    start.add_argument("--port", type=int, help="Initial loopback port (default: 8080)")
+    proxies.add_parser("stop", help="Stop only the odx-owned proxy; retain its routes")
+    proxies.add_parser("status", help="Show proxy state and registered routes")
+    proxies.add_parser("register", help="Refresh the selected running instance's Odoo route")
+    remove = proxies.add_parser("remove", help="Remove one exact stale hostname")
+    remove.add_argument("hostname")
     init = commands.add_parser(
         "init", help="Create a new declarative workspace, without starting Docker"
     )
@@ -330,6 +339,16 @@ def _status(runtime, as_json=False):
             port = {"odoo": 8069, "opencode": 4096}.get(service)
             if port and row.get("State") == "running":
                 info[f"{service}_url"] = runtime.url(service, port)
+    if "odoo_url" in info:
+        from . import proxy
+
+        try:
+            stable = proxy.url(runtime, info["odoo_url"])
+            if stable:
+                info["odoo_proxy_url"] = stable
+                info["proxy_running"] = proxy.running()
+        except OdxError as error:
+            print(f"odx: {error}", file=sys.stderr)
     if as_json:
         print(json.dumps(info, indent=2))
     else:
@@ -342,6 +361,10 @@ def _status(runtime, as_json=False):
 
 
 def host(args):
+    if args.command == "proxy":
+        from . import proxy
+
+        return proxy.command(args)
     if args.command == "init":
         return init_workspace(args)
     workspace = Workspace.load(find_workspace(args.workspace))
@@ -392,6 +415,9 @@ def host(args):
         from .setup import prepare
 
         prepare(runtime, code=args.code)
+        from . import proxy
+
+        proxy.sync(runtime)
         return _status(runtime)
     if args.command == "configure":
         if args.allow_database_switch and runtime.compose_file.exists():
@@ -413,10 +439,16 @@ def host(args):
             if args.code:
                 opencode.host_version()
             runtime.compose(*command)
+            from . import proxy
+
+            proxy.sync(runtime)
         return _status(runtime)
     if args.command == "down":
         with locked(runtime.operation_lock):
             runtime.compose("--profile", "code", "down")
+            from . import proxy
+
+            proxy.sync(runtime, remove=True)
         return 0
     if args.command == "deps":
         return runtime.compose("exec", "-T", "odoo", "odx", "deps", check=False).returncode
@@ -447,7 +479,12 @@ def host(args):
                 raise OdxError("update cannot be combined with --info")
             from .adapters.opencode_update import update
 
-            return update(runtime)
+            result = update(runtime)
+            if result == 0:
+                from . import proxy
+
+                proxy.sync(runtime)
+            return result
         if args.args[:1] == ["update"]:
             raise OdxError("Usage: odx code opencode update (no additional arguments)")
         if args.args[:1] == ["--"]:

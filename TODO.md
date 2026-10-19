@@ -44,6 +44,21 @@ and live validation distinct.
 - [x] Match the PostgreSQL client to the server (16/18 profiles, official PGDG packages).
 - [ ] Make UID/GID configurable and validate editable mounts on a real Linux host.
 
+### Stable local browser URLs
+
+- [x] Optional shared native Caddy managed by `odx proxy start/stop/status`;
+  explicit installation, private registry/logs/admin Unix socket, loopback HTTP only.
+- [x] Stable `<workspace>-<instance>.localhost:8080` routes, explicit registration
+  for existing instances, automatic refresh after CLI up/setup/OpenCode update,
+  removal on down, and exact stale-route removal. Direct Docker URLs remain usable.
+- [x] Automated tests: opt-in, validation, ownership collisions, locks, failed reload,
+  persistent stop/start state, private profile, and status URLs.
+- [x] Isolated live Caddy validation on macOS with a disposable HTTP backend:
+  HTTP forwarding, Host/path preservation, unknown-host 404, WebSocket upgrade,
+  route reload/removal, and shutdown. No existing workspace or system service touched.
+- [ ] Live Odoo browser validation across down/up and simultaneous client instances;
+  Linux native proxy validation. No claim of completed Docker/Odoo proxy validation.
+
 ## 2. OpenCode
 
 - [x] Concrete adapter and `odx code opencode` command; no other assistants.
