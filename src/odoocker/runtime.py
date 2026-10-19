@@ -179,6 +179,10 @@ class Runtime:
         mounts.extend(
             bind(path, f"/opt/addons/{index}") for index, path in enumerate(self.workspace.addons)
         )
+        configuration = asdict(self.workspace)
+        if not self.workspace.skill_sources:
+            # Keep the historical label when the optional feature is not configured.
+            configuration.pop("skill_sources")
         common = {
             "image": self.image(),
             "build": {
@@ -194,7 +198,7 @@ class Runtime:
             "environment": {"ODOOCKER_CONTAINER": "1"},
             "labels": {
                 "io.odoocker.configuration": hashlib.sha256(
-                    json.dumps(asdict(self.workspace), default=str, sort_keys=True).encode(),
+                    json.dumps(configuration, default=str, sort_keys=True).encode(),
                 ).hexdigest()
             },
             "depends_on": {
@@ -232,6 +236,19 @@ class Runtime:
                 volume("opencode-state", "/home/odoo/.local/state/opencode"),
             ],
         }
+        if self.workspace.skill_sources:
+            opencode["volumes"].append(
+                bind(
+                    self.directory / "opencode-skills.json",
+                    "/etc/opencode/opencode.json",
+                    readonly=True,
+                )
+            )
+            for index, source in enumerate(self.workspace.skill_sources):
+                target = f"/mnt/odoocker/skills/{index}"
+                if source.directory is not None:
+                    target += f"/{source.directory}"
+                opencode["volumes"].append(bind(source.path, target, readonly=True))
         return {
             "name": self.project,
             "services": {
@@ -333,6 +350,22 @@ class Runtime:
                 write_private(self.directory / name, content)
                 (self.directory / name).chmod(0o644)
             self.directory.chmod(0o700)
+            if self.workspace.skill_sources:
+                skills_config = self.directory / "opencode-skills.json"
+                write_private(
+                    skills_config,
+                    json.dumps(
+                        {
+                            "$schema": "https://opencode.ai/config.json",
+                            "skills": [
+                                f"/mnt/odoocker/skills/{index}"
+                                for index in range(len(self.workspace.skill_sources))
+                            ],
+                        },
+                        indent=2,
+                    ),
+                )
+                skills_config.chmod(0o644)
             write_private(self.directory / "compose.env", "")
             write_private(
                 self.compose_file, json.dumps(_literals(self.compose_document()), indent=2)

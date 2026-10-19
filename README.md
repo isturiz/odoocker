@@ -367,18 +367,111 @@ source = "/local/path/to/odoo"
 addons = ["./addons/my-client", "/path/to/oca-repository"]
 ```
 
-Local paths are optional and are added to the declared repositories. There is no
+Local Odoo paths are optional and are added to the declared repositories. There is no
 need to repeat `[[addons]]` here; duplicate paths are rejected.
 
 Each addons entry is a directory whose children are modules. They are mounted
 read/write for development. Relative paths are resolved from the workspace, not
-from the terminal. SSH keys, the Docker socket, and global OpenCode configuration
-are not mounted. Project files such as `.opencode/` are part of the mounted
+from the terminal. SSH keys, the Docker socket, and the global OpenCode profile
+are not mounted. Host skills can be shared separately, as described below.
+Project files such as `.opencode/` are part of the mounted
 workspace and can be read by the agent.
 
 The CLI rejects unknown keys to catch configuration errors early.
 After changing the manifest, paths, or engine version, run `configure` and `up`
 to regenerate/recreate. Do not regenerate while another session is using the instance.
+
+### Share host OpenCode skills (optional)
+
+Opt in per workspace and machine in **`odoocker.local.toml`**, which must remain
+excluded from Git. Share the complete global skills directory:
+
+```toml
+[opencode]
+skill_sources = ["~/.config/opencode/skills"]
+```
+
+Or select individual directory skills or other skill collections:
+
+```toml
+[opencode]
+skill_sources = [
+  "~/shared-skills/odoo-review",
+  "~/shared-skills/release",
+]
+```
+
+These are illustrative paths, not installed defaults. Use the actual skills path
+if your host uses a custom `XDG_CONFIG_HOME`; no host OpenCode command or profile
+import is performed. Omitted `skill_sources` or `[]` keeps the original behavior.
+This setting is rejected in the version-controlled `odoocker.toml`.
+
+Each source must be an existing directory containing skills: root-level `*.md`
+files, or nested directories with `SKILL.md`. A source containing its own
+`SKILL.md` is treated as an individual directory skill. Its configured directory
+name supplies the ID, including when that directory is a symlink; the frontmatter
+`name` is only a display label. Nested directory skills retain their own IDs.
+For individual skills, the engine registers a virtual parent directory, avoiding
+OpenCode V2's root-level `SKILL.md` ID of `SKILL`.
+
+The engine mounts each complete source **read-only**, only in the OpenCode
+service, under `/mnt/odoocker/skills/<index>`. Scripts, references, templates,
+executable permissions and other supporting files remain alongside the skill.
+There is no copying, synchronization script, host Docker socket, or profile mount.
+Only an engine-generated `skills` array is mounted as the container's system
+configuration at `/etc/opencode/opencode.json`. The independent OpenCode
+configuration/data/state volumes remain unchanged; host credentials, general
+configuration, plugins and state outside the selected directories are not exposed.
+
+**Duplicate IDs:** OpenCode's native explicit sources override automatically
+discovered global/container and project skills. The engine's system-level entries
+also follow lower-priority explicit config entries. Within `skill_sources`, the
+**last source wins**. Earlier definitions are not overwritten or deleted; removing
+the shared source reveals them again. Ambiguous duplicate IDs *inside a single
+host source* are rejected: select separate sources in the desired order or give
+the skills distinct IDs. Avoid collisions unless the override is intentional.
+
+Path rules and limitations:
+
+- `~` expands on the host; relative paths resolve from the workspace, not the shell.
+- Symlinks in source paths are resolved before mounting. For example,
+  `~/.config/opencode -> ~/config/opencode` works without mounting that profile.
+- Duplicate/overlapping canonical sources, missing/empty sources, unreadable
+  trees, special files and profile roots are rejected. Source roots containing
+  `opencode.json(c)`, `cli.json` or `auth.json` are also rejected to catch profile
+  selection mistakes. All files *inside* an accepted source are shared: select
+  trusted skills directories and do not put secrets in them.
+- Relative symlinks inside a source are supported only if they remain inside that
+  source. Broken links, cycles, absolute links (even to host-internal files), and
+  links to unselected siblings are rejected. Select a common collection root or
+  make the supporting files self-contained instead of exposing more host paths.
+- Read-only mounts prevent writes through the shared paths, not execution of
+  untrusted scripts or writes through another independently writable workspace/addon
+  mount. Skills are executable instructions, not a sandbox. The container's UID
+  1000 must be able to read/traverse the sources; real Linux permissions still apply.
+- File edits within an existing mount are visible without a copy step; OpenCode's
+  own discovery/cache controls when they are reloaded. After changing sources or
+  symlink targets, deliberately reconfigure/recreate the instance. No hot-reload
+  guarantee is made.
+
+Apply only when the instance is idle, using the checkout if testing the engine:
+
+```sh
+uv run --project /path/to/odoocker odx down
+uv run --project /path/to/odoocker odx configure
+uv run --project /path/to/odoocker odx up --code
+```
+
+To disable, remove the setting or set it to `[]`, then repeat that explicit
+workflow. No container/project skills or volume contents are deleted, including
+files added independently in the container. An old generated `opencode-skills.json`
+may remain under `.odoocker/instances/<instance>/`; it is no longer mounted and
+contains only container search paths, not copied skill content.
+
+See the official V2 [skills](https://opencode.ai/v2/docs/skills) and
+[configuration](https://opencode.ai/v2/docs/config) documentation for native
+discovery and precedence. Automated filesystem/Compose tests do not establish
+live discovery or read-only enforcement by Docker/OpenCode; see `TODO.md`.
 
 ### Odoo web database manager
 

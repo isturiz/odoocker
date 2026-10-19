@@ -84,7 +84,8 @@ and live validation distinct.
 - [x] Verify empty session persistence after `down`/`up`; provider conversation still pending.
 - [ ] Validate native worktree paths and metadata from the host and container.
 - [ ] Associate resources with existing addons checkouts without managing their Git lifecycle.
-- [ ] Explicit, limited export of global configuration without copying secrets.
+- [x] Opt-in read-only sharing of host skills only, without exporting the personal
+  profile or secrets (implementation and validation scope below).
 - [ ] Evaluate safe automatic server startup from `code` after validating the basic workflow.
 
 ## 3. Tests and concurrent agents
@@ -553,3 +554,37 @@ OpenCode. Do not automatically migrate or clean up existing environments.
 - [ ] Live Docker validation of enabled manager and HTTP selection of development copies.
 - No installed/global engine update, client configuration changes, service operations
   or database changes are part of this delivery; adoption remains user-managed.
+
+## Optional host OpenCode skill sharing
+
+- [x] Local-only `opencode.skill_sources` in `odoocker.local.toml`: share a global
+  skills collection or selected directory skills, with unchanged unconfigured behavior.
+- [x] Read-only binds only in OpenCode, preserving complete supporting-file trees;
+  generated system `skills` entries use virtual parents for individual `SKILL.md`
+  directories. No legacy synchronization, profile import, plugins, credentials or
+  host state are copied, and no container/project skill directory is managed/deleted.
+- [x] Follow native explicit-source precedence: shared sources override discovered
+  container/project definitions; the last configured shared source wins. Reject
+  duplicate IDs within one source instead of relying on filesystem traversal order.
+- [x] Resolve home/workspace-relative paths and symlinked host profile parents;
+  reject overlapping sources, profile roots, missing/empty sources, special files,
+  absolute/broken/escaping links and cycles. Preserve safe relative supporting links.
+- [x] Revalidate sources before generation, retain ordinary stale-configuration
+  guards, and preserve native volume mounts/identities/credentials across toggles.
+  Disabling removes only generated mount references; no source/volume cleanup occurs.
+- [x] 889 automated tests pass (`uv run pytest`), including 51 new synthetic
+  filesystem/Compose tests for discovery paths/IDs/order, scripts/references,
+  symlink boundaries, invalid settings, defaults, toggles, instances, literal dollar
+  paths, setup isolation, update acceptance/staleness and restore topology.
+- [x] Ruff lint, formatting checks for changed Python files and Git whitespace checks
+  pass. Whole-repository `ruff format --check .` still reports existing formatting
+  in `src/odoocker/proxy.py`, `tests/test_cli.py`, `tests/test_opencode.py` and
+  `tests/test_proxy.py`; those unrelated files are not reformatted in this delivery.
+- [ ] Live validation in a new, isolated Docker/OpenCode workspace: advertised skills
+  and actual load/base directories, supporting script/reference access, write
+  rejection, ID precedence, and container/project skill preservation after disabling.
+  Repeat permissions checks on Linux. Automated contracts do not prove live behavior
+  for every pinned OpenCode V2 release or Docker platform.
+- No Docker/OpenCode service was started or restarted, no installed/global engine
+  was updated, and no personal profile, Realista configuration or existing workspace
+  was changed. No commits or automatic adoption/publication are part of this delivery.

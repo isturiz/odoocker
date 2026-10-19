@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .errors import OdxError
+from .skills import SkillSource, skill_sources
 
 MANIFEST = "odoocker.toml"
 LOCAL = "odoocker.local.toml"
@@ -154,6 +155,7 @@ class Workspace:
     odoo_options: dict[str, int | bool | str] = field(default_factory=dict)
     postgres_version: str = "16"
     pgvector: bool = False
+    skill_sources: tuple[SkillSource, ...] = ()
 
     @classmethod
     def load(cls, root):
@@ -182,7 +184,10 @@ class Workspace:
         if not isinstance(code_version, str) or not VERSION.fullmatch(code_version):
             raise OdxError("opencode.version must be an exact OpenCode V2 release, e.g. 2.0.30")
         local = _read(root / LOCAL) if (root / LOCAL).exists() else {}
-        _keys(local, {"odoo"}, "local configuration")
+        _keys(local, {"odoo", "opencode"}, "local configuration")
+        local_opencode = local.get("opencode", {})
+        _keys(local_opencode, {"skill_sources"}, "local opencode")
+        shared_skills = skill_sources(root, local_opencode.get("skill_sources", []))
         local_odoo = local.get("odoo", {})
         _keys(local_odoo, {"source", "addons"}, "local odoo")
         source = _path(root, local_odoo.get("source", ".odoocker/sources/odoo"), "odoo.source")
@@ -237,6 +242,7 @@ class Workspace:
             options,
             postgres_version,
             pgvector,
+            shared_skills,
         )
 
     def validate_core(self):
@@ -252,6 +258,8 @@ class Workspace:
 
     def validate_sources(self):
         self.validate_core()
+        for source in self.skill_sources:
+            source.validate()
         for addon in self.addons:
             if not addon.is_dir():
                 raise OdxError(f"Addon directory does not exist: {addon}; run odx fetch")
