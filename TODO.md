@@ -58,6 +58,17 @@ and live validation distinct.
   route reload/removal, and shutdown. No existing workspace or system service touched.
 - [ ] Live Odoo browser validation across down/up and simultaneous client instances;
   Linux native proxy validation. No claim of completed Docker/Odoo proxy validation.
+- [x] Add service-aware OpenCode routes without invalidating legacy Odoo registry
+  entries. Client and `--info` refresh/select the stable route when Caddy is active;
+  preserve authentication/client isolation and warn on stopped-proxy direct fallback.
+  Full instance registration refreshes running services and down removes both routes.
+- [x] Automated tests for dual-service isolation, changed ports, cross-service
+  collisions, legacy entries, route selection, authentication, and direct fallback.
+- [x] Live isolated native OpenCode/Caddy validation: authenticated API calls before
+  and after restarting the server on a different port through the same hostname;
+  unauthenticated proxied requests still rejected. Disposable profiles only.
+- [ ] Validate an already-open interactive OpenCode TUI recovering after Docker
+  down/up with a changed port. Native API restart validation is not a TUI recovery test.
 
 ## 2. OpenCode
 

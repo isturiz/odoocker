@@ -15,6 +15,7 @@ from .runtime import run_command, write_private
 
 HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.localhost\Z")
 UPSTREAM = re.compile(r"127\.0\.0\.1:([0-9]+)\Z")
+SERVICES = {"odoo": 8069, "opencode": 4096}
 
 
 def directory():
@@ -62,6 +63,7 @@ def load():
                 or not match
                 or not 1 <= int(match[1]) <= 65535
                 or not isinstance(route["project"], str)
+                or route.get("service", "odoo") not in SERVICES
             ):
                 raise ValueError("Invalid proxy route")
         return state
@@ -73,7 +75,13 @@ def document(state):
     routes = [
         {
             "match": [{"host": [host]}],
-            "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": route["upstream"]}]}],
+            "handle": [{
+                "handler": "reverse_proxy",
+                "upstreams": [{"dial": route["upstream"]}],
+                # Flush event streams immediately; retain WebSockets during route reloads.
+                "flush_interval": -1,
+                "stream_close_delay": 300000000000,
+            }],
             "terminal": True,
         }
         for host, route in sorted(state["routes"].items())
@@ -143,36 +151,50 @@ def save(state, *, start=False):
     candidate.replace(root / "caddy.json")
 
 
-def hostname(runtime):
-    host = f"{runtime.workspace.name}-{runtime.instance}".replace("_", "-") + ".localhost"
+def hostname(runtime, service="odoo"):
+    prefix = "opencode-" if service == "opencode" else ""
+    host = f"{prefix}{runtime.workspace.name}-{runtime.instance}".replace("_", "-") + ".localhost"
     if not HOST.fullmatch(host):
         raise OdxError("Proxy workspace-instance hostname must fit in a 63-character DNS label")
     return host
 
 
-def register(runtime):
+def register(runtime, *, service=None):
     with locked(directory() / "proxy.lock"):
         state = load()
         if state is None:
             raise OdxError("Proxy is not configured; first run odx proxy start")
-        host = hostname(runtime)
-        previous = state["routes"].get(host)
-        if previous and previous["project"] != runtime.project:
-            raise OdxError(f"Proxy hostname already belongs to another instance: {host}")
-        upstream = runtime.url("odoo", 8069).removeprefix("http://")
-        match = UPSTREAM.fullmatch(upstream)
-        if not match or not 1 <= int(match[1]) <= 65535:
-            raise OdxError("Proxy requires an Odoo port published on 127.0.0.1")
+        services = [service] if service else runtime.compose(
+            "ps", "--status", "running", "--services", capture=True
+        ).stdout.split()
+        services = [name for name in SERVICES if name in services]
+        if not services:
+            raise OdxError("No running Odoo/OpenCode services; run odx up (with --code if needed)")
+        routes = {}
+        for name in services:
+            host = hostname(runtime, name)
+            previous = state["routes"].get(host)
+            if previous and (
+                previous["project"] != runtime.project
+                or previous.get("service", "odoo") != name
+            ):
+                raise OdxError(f"Proxy hostname already belongs to another instance: {host}")
+            upstream = runtime.url(name, SERVICES[name]).removeprefix("http://")
+            match = UPSTREAM.fullmatch(upstream)
+            if not match or not 1 <= int(match[1]) <= 65535:
+                raise OdxError(f"Proxy requires a {name} port published on 127.0.0.1")
+            routes[host] = {"project": runtime.project, "upstream": upstream, "service": name}
         state["routes"] = {
             key: value
             for key, value in state["routes"].items()
             if value["project"] != runtime.project
+            or (service and value.get("service", "odoo") != service)
         }
-        state["routes"][host] = {"project": runtime.project, "upstream": upstream}
+        state["routes"].update(routes)
         save(state)
         if not running():
             print("odx: proxy is stopped; run odx proxy start", file=sys.stderr)
-        return f"http://{host}:{state['port']}"
+        return f"http://{hostname(runtime, services[0])}:{state['port']}"
 
 
 def unregister(runtime):
@@ -201,11 +223,15 @@ def sync(runtime, *, remove=False):
         print(f"odx: proxy route update failed: {error}; retry with {recovery}", file=sys.stderr)
 
 
-def url(runtime, direct):
+def url(runtime, direct, service="odoo"):
     state = load()
     if state:
         for host, route in state["routes"].items():
-            if route == {"project": runtime.project, "upstream": direct.removeprefix("http://")}:
+            if (
+                route["project"] == runtime.project
+                and route["upstream"] == direct.removeprefix("http://")
+                and route.get("service", "odoo") == service
+            ):
                 return f"http://{host}:{state['port']}"
     return None
 

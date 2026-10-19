@@ -30,6 +30,7 @@ def runtime(tmp_path, monkeypatch):
     workspace = Workspace(tmp_path / "client", "client", "19.0", "2.0.30", tmp_path)
     runtime = Runtime.load(workspace)
     monkeypatch.setattr(Runtime, "url", lambda *args: "http://127.0.0.1:49000")
+    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(stdout="odoo\n"))
     return runtime
 
 
@@ -105,6 +106,9 @@ def test_document_is_loopback_http_only_and_defaults_to_404(runtime):
     assert server["listen"] == ["127.0.0.1:8080"]
     assert server["automatic_https"] == {"disable": True}
     assert server["routes"][0]["match"] == [{"host": ["client-main.localhost"]}]
+    handler = server["routes"][0]["handle"][0]
+    assert handler["flush_interval"] == -1
+    assert handler["stream_close_delay"] == 300000000000
     assert server["routes"][-1]["handle"][0]["status_code"] == 404
 
 
@@ -148,6 +152,64 @@ def test_long_host_and_underscore_normalization(runtime):
         proxy.hostname(replace(runtime, instance="x" * 60))
 
 
+def test_both_services_refresh_and_remove_independently(runtime, monkeypatch):
+    cli.main(["proxy", "start"])
+    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
+        stdout="odoo\nopencode\ndb\n"
+    ))
+    proxy.register(runtime)
+    assert set(proxy.load()["routes"]) == {
+        "client-main.localhost", "opencode-client-main.localhost"
+    }
+    monkeypatch.setattr(Runtime, "url", lambda *args: "http://127.0.0.1:49002")
+    assert proxy.register(runtime, service="opencode") == (
+        "http://opencode-client-main.localhost:8080"
+    )
+    routes = proxy.load()["routes"]
+    assert routes["client-main.localhost"]["upstream"] == "127.0.0.1:49000"
+    assert routes["opencode-client-main.localhost"]["upstream"] == "127.0.0.1:49002"
+    assert proxy.url(runtime, "http://127.0.0.1:49002", "opencode") is not None
+    proxy.unregister(runtime)
+    assert proxy.load()["routes"] == {}
+
+
+def test_registration_without_opencode_removes_its_stale_route(runtime):
+    cli.main(["proxy", "start"])
+    proxy.register(runtime, service="opencode")
+    proxy.register(runtime)
+    assert list(proxy.load()["routes"]) == ["client-main.localhost"]
+
+
+def test_legacy_odoo_registry_remains_readable(runtime):
+    cli.main(["proxy", "start"])
+    state = proxy.load()
+    state["routes"]["client-main.localhost"] = {
+        "project": runtime.project, "upstream": "127.0.0.1:49000"
+    }
+    proxy.save(state)
+    assert proxy.url(runtime, "http://127.0.0.1:49000") is not None
+    proxy.register(runtime, service="opencode")
+    assert len(proxy.load()["routes"]) == 2
+
+
+def test_cross_service_hostname_collision_is_not_overwritten(runtime):
+    cli.main(["proxy", "start"])
+    proxy.register(runtime, service="opencode")
+    other = replace(runtime, workspace=replace(runtime.workspace, name="opencode-client"))
+    with pytest.raises(OdxError, match="another instance"):
+        proxy.register(other)
+
+
+def test_no_services_does_not_remove_existing_routes(runtime, monkeypatch):
+    cli.main(["proxy", "start"])
+    proxy.register(runtime)
+    before = proxy.load()
+    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(stdout="db\n"))
+    with pytest.raises(OdxError, match="No running"):
+        proxy.register(runtime)
+    assert proxy.load() == before
+
+
 def test_caddy_uses_private_profile(monkeypatch):
     calls = []
     monkeypatch.setenv("XDG_DATA_HOME", "/example")
@@ -188,11 +250,14 @@ def test_status_reports_stable_and_direct_url(runtime, monkeypatch, capsys):
     runtime.directory.mkdir(parents=True, exist_ok=True)
     runtime.compose_file.write_text("{}")
     monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
-        stdout='[{"Service": "odoo", "State": "running"}]'
+        stdout='[{"Service": "odoo", "State": "running"},'
+        '{"Service": "opencode", "State": "running"}]'
     ))
+    proxy.register(runtime, service="opencode")
     capsys.readouterr()
     cli._status(runtime, as_json=True)
     info = json.loads(capsys.readouterr().out)
     assert info["odoo_url"] == "http://127.0.0.1:49000"
     assert info["odoo_proxy_url"] == "http://client-main.localhost:8080"
+    assert info["opencode_proxy_url"] == "http://opencode-client-main.localhost:8080"
     assert info["proxy_running"] is False

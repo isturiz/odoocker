@@ -42,7 +42,7 @@ def parser():
     start.add_argument("--port", type=int, help="Initial loopback port (default: 8080)")
     proxies.add_parser("stop", help="Stop only the odx-owned proxy; retain its routes")
     proxies.add_parser("status", help="Show proxy state and registered routes")
-    proxies.add_parser("register", help="Refresh the selected running instance's Odoo route")
+    proxies.add_parser("register", help="Refresh the running instance's Odoo/OpenCode routes")
     remove = proxies.add_parser("remove", help="Remove one exact stale hostname")
     remove.add_argument("hostname")
     init = commands.add_parser(
@@ -339,14 +339,16 @@ def _status(runtime, as_json=False):
             port = {"odoo": 8069, "opencode": 4096}.get(service)
             if port and row.get("State") == "running":
                 info[f"{service}_url"] = runtime.url(service, port)
-    if "odoo_url" in info:
+    if "odoo_url" in info or "opencode_url" in info:
         from . import proxy
 
         try:
-            stable = proxy.url(runtime, info["odoo_url"])
-            if stable:
-                info["odoo_proxy_url"] = stable
-                info["proxy_running"] = proxy.running()
+            for service in ("odoo", "opencode"):
+                if f"{service}_url" in info:
+                    stable = proxy.url(runtime, info[f"{service}_url"], service)
+                    if stable:
+                        info[f"{service}_proxy_url"] = stable
+                        info["proxy_running"] = proxy.running()
         except OdxError as error:
             print(f"odx: {error}", file=sys.stderr)
     if as_json:

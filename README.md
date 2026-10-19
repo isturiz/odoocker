@@ -188,8 +188,9 @@ http://client-main.localhost:8080
 ```
 
 After the first `proxy start`, `up`, `setup`, and successful OpenCode updates
-automatically refresh the selected instance's Odoo route. `down` removes only that
-instance's route, not the shared proxy. Odoo still needs `odx run` to serve HTTP.
+automatically refresh the selected instance's running Odoo/OpenCode routes. `down`
+removes only that instance's routes, not the shared proxy. Odoo still needs `odx run`
+to serve HTTP; start OpenCode with `up --code` or `setup --code`.
 Existing workspaces are not discovered or changed automatically: use `register`
 or their next normal startup. Instances keep separate hostnames and browser cookies.
 
@@ -214,8 +215,20 @@ odx proxy remove client-testing.localhost  # Remove one exact stale route
   with `proxy register`; direct access remains available when Caddy is unavailable.
 - Use `odx` for container recreation: external Docker changes do not refresh routes.
   Remove routes for abandoned workspaces explicitly; there is no Docker discovery.
-- This first version proxies only Odoo, not the assistant or PostgreSQL. It preserves
-  the HTTP Host and supports WebSocket upgrades. It does not enable Odoo's
+- OpenCode uses `http://opencode-<workspace>-<instance>.localhost:8080`.
+  `odx code opencode` and `--info` refresh and select that stable route when the
+  proxy is active, retaining the instance password and isolated client state.
+  With no proxy configured they use the direct port; a stopped proxy produces a
+  warning and direct-port fallback. Start the proxy **before opening the client**
+  to benefit from the stable URL. Already-open direct connections must be relaunched
+  once after adopting it. Refreshes require `odx` startup commands or explicit
+  `proxy register` if containers are recreated externally.
+- The proxy preserves the HTTP Host and authentication headers, immediately flushes
+  event streams, and supports WebSocket upgrades (with a five-minute close delay
+  during configuration reloads). The stable URL survives server port changes, but
+  downtime still interrupts connections and running operations. Recovery of an
+  already-open TUI depends on OpenCode's own reconnect behavior, not the proxy.
+  PostgreSQL is never proxied. The proxy does not enable Odoo's
   `proxy_mode`: HTTP scheme/host remain unchanged, with no TLS termination.
 
 Browsers normally resolve `*.localhost` to loopback. For command-line diagnostics

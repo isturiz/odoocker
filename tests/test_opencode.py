@@ -10,7 +10,8 @@ from odoocker.errors import OdxError
 
 
 @pytest.fixture(autouse=True)
-def no_external_processes(monkeypatch):
+def no_external_processes(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
     def forbidden(*args, **kwargs):
         pytest.fail("Unit tests must not invoke the real OpenCode client")
 
@@ -232,3 +233,49 @@ def test_version_mismatch_never_starts_client(runtime, monkeypatch, operation):
         else:
             opencode.info(runtime)
     assert runtime.compose_calls == []
+
+
+@pytest.mark.parametrize("operation", ["connect", "info"])
+def test_active_proxy_is_used_with_original_authentication(runtime, monkeypatch, operation):
+    calls = []
+    registered = []
+    monkeypatch.setattr(opencode, "verify", lambda r: None)
+    monkeypatch.setattr(opencode.proxy, "load", lambda: {"schema": 1})
+    monkeypatch.setattr(opencode.proxy, "running", lambda: True)
+
+    def register(r, **kw):
+        registered.append((r, kw))
+        return "http://opencode-test-feature.localhost:8080"
+
+    monkeypatch.setattr(opencode.proxy, "register", register)
+    monkeypatch.setattr(opencode, "run_command", lambda *a, **kw: (
+        calls.append((a, kw)) or SimpleNamespace(returncode=0)
+    ))
+    if operation == "connect":
+        opencode.connect(runtime, [])
+    else:
+        opencode.info(runtime)
+    assert registered == [(runtime, {"service": "opencode"})]
+    args, options = calls[-1]
+    assert "http://opencode-test-feature.localhost:8080" in args[0]
+    assert runtime.password not in " ".join(args[0])
+    assert options["env"]["OPENCODE_PASSWORD"] == runtime.password
+
+
+def test_stopped_proxy_warns_and_uses_direct_port(runtime, monkeypatch, capsys):
+    monkeypatch.setattr(opencode.proxy, "load", lambda: {"schema": 1})
+    monkeypatch.setattr(opencode.proxy, "running", lambda: False)
+    assert opencode.server_url(runtime) == "http://127.0.0.1:49152"
+    assert "using the direct OpenCode port" in capsys.readouterr().err
+
+
+def test_active_proxy_failure_does_not_silently_select_unstable_port(runtime, monkeypatch):
+    monkeypatch.setattr(opencode.proxy, "load", lambda: {"schema": 1})
+    monkeypatch.setattr(opencode.proxy, "running", lambda: True)
+
+    def fail(*a, **kw):
+        raise OdxError("reload failed")
+
+    monkeypatch.setattr(opencode.proxy, "register", fail)
+    with pytest.raises(OdxError, match="reload failed"):
+        opencode.server_url(runtime)
