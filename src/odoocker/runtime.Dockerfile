@@ -21,6 +21,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
     fonts-dejavu-core postgresql-client-${POSTGRES_VERSION} \
     && rm -rf /var/lib/apt/lists/*
+# Odoo needs upstream's patched Qt for report headers/footers; Debian's build lacks it.
+# Bookworm packages from wkhtmltopdf/packaging release 0.12.6.1-3, pinned per architecture.
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) sha256="98ba0d157b50d36f23bd0dedf4c0aa28c7b0c50fcdcdc54aa5b6bbba81a3941d" ;; \
+        arm64) sha256="b6606157b27c13e044d0abbe670301f88de4e1782afca4f9c06a5817f3e03a9c" ;; \
+        *) echo "Unsupported wkhtmltopdf architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 3 \
+        "https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${arch}.deb" \
+        -o /tmp/wkhtmltox.deb; \
+    printf '%s  %s\n' "$sha256" /tmp/wkhtmltox.deb | sha256sum -c -; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb; \
+    test "$(wkhtmltopdf --version)" = "wkhtmltopdf 0.12.6.1 (with patched qt)"; \
+    rm -f /tmp/wkhtmltox.deb; \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 RUN groupadd -g 1000 odoo && useradd -m -u 1000 -g 1000 -s /bin/bash odoo \
     && mkdir -p /opt/venv /var/lib/odoocker \

@@ -403,6 +403,23 @@ def test_client_image_depends_on_postgres_major(runtime):
     assert changed.image() != runtime.image()
 
 
+def test_runtime_dockerfile_changes_invalidate_both_service_images(runtime, tmp_path, monkeypatch):
+    package = tmp_path / "engine"
+    package.mkdir()
+    dockerfile = package / "runtime.Dockerfile"
+    dockerfile.write_text("FROM example\n")
+    monkeypatch.setattr(runtime_module, "PACKAGE", package)
+    before = runtime.compose_document()
+    dockerfile.write_text("FROM example\nRUN install-pdf-dependencies\n")
+    after = runtime.compose_document()
+    assert before["volumes"] == after["volumes"]
+    assert before["services"]["db"] == after["services"]["db"]
+    for service in ("odoo", "opencode"):
+        assert before["services"][service]["image"] != after["services"][service]["image"]
+        assert before["services"][service]["volumes"] == after["services"][service]["volumes"]
+    assert after["services"]["odoo"]["image"] == after["services"]["opencode"]["image"]
+
+
 def test_generate_rejects_invalid_source_without_creating_compose(runtime):
     (runtime.workspace.source / "odoo-bin").unlink()
     with pytest.raises(OdxError, match="Odoo source missing"):

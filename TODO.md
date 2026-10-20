@@ -40,7 +40,8 @@ and live validation distinct.
 - [x] Create separate 17 and 19 sandboxes, reusing only read-only core sources.
 - [x] Validate live installation and startup of both versions simultaneously.
 - [x] Reject stale generated configuration and instance reuse across versions.
-- [ ] Include patched wkhtmltopdf, rtlcss, and an optional browser/tour profile.
+- [x] Include patched wkhtmltopdf by default (see the PDF report delivery below).
+- [ ] Include rtlcss and an optional browser/tour profile.
 - [x] Match the PostgreSQL client to the server (16/18 profiles, official PGDG packages).
 - [ ] Make UID/GID configurable and validate editable mounts on a real Linux host.
 
@@ -588,3 +589,42 @@ OpenCode. Do not automatically migrate or clean up existing environments.
 - No Docker/OpenCode service was started or restarted, no installed/global engine
   was updated, and no personal profile, Realista configuration or existing workspace
   was changed. No commits or automatic adoption/publication are part of this delivery.
+
+## Default PDF report support
+
+- [x] Include upstream wkhtmltopdf `0.12.6.1-3` with patched Qt in the shared
+  Odoo/OpenCode image unconditionally, with native Bookworm `amd64`/`arm64` packages,
+  per-architecture SHA-256 verification before installation, apt-managed runtime/font
+  dependencies and a build-time version/patched-Qt check. Reject unsupported
+  architectures and download/checksum/install failures; no user configuration flag,
+  Odoo patch or relaxed local-file access is introduced.
+- [x] Add offline shell-contract tests executing the shipped Dockerfile block with
+  stubbed external commands, covering architecture selection, verification ordering,
+  installation failures and unpatched/wrong versions. Cover image invalidation for
+  both services while preserving database configuration and volume references.
+- [x] Document explicit adoption through rebuilding/recreating idle instances, without
+  updating their version pins or deleting persistent resources. Keep rtlcss and browser
+  dependencies separate from this delivery.
+- [x] 904 automated tests pass (`uv run pytest`); Ruff lint, changed-Python formatting
+  checks and Git whitespace checks pass. Build wheel/sdist and verify the pinned PDF
+  installer is packaged from an isolated wheel installation. Whole-repository formatting
+  still reports the four pre-existing files recorded in the skills delivery; do not
+  reformat unrelated code.
+- [x] Live macOS arm64/Docker Desktop: build the full shared runtime, then run native
+  Odoo 17 and 19 `TestReportsRendering.test_layout` and
+  `TestReportsRendering.test_report_pdf_page_break` in new `pdf-smoke-17/19` workspaces.
+  Both runs pass two tests, checking logo/layout, repeated headers/footers, page numbering
+  and four-page output; report CSS requests return HTTP 200. Install the optional
+  `pdfminer.six` assertion helper only in these validation workspaces, not the engine.
+  Managed test DBs/filestores are cleaned; inventory confirms no test/development DBs
+  remain. Stop both workspaces afterward, preserving runtime volumes/logs.
+- [x] Live native arm64 synthetic PDF: run as the image's ordinary Odoo user, fetch
+  body/CSS/PNG/header/footer over loopback HTTP, check two pages' text and embedded
+  image objects, and confirm zero wkhtmltopdf stderr. No local-file access override.
+- [x] Repeat the synthetic PDF smoke under amd64 emulation using the actual runtime
+  Dockerfile through its PDF installation layer, with an ordinary UID-1000 user and
+  no external network at execution time. Verify the amd64 package checksum during
+  build, both pages' header/footer/body text, embedded PNGs and all loopback HTTP asset
+  requests. This is not a full amd64 OpenCode/Odoo image or native Linux-host validation;
+  client-specific/business reports and interactive browser printing remain unvalidated.
+- No installed/global CLI upgrade or existing client/container changes are included.

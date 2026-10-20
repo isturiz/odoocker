@@ -832,10 +832,44 @@ They do not coordinate external processes or prevent two agents from editing the
 same file. A forced Docker shutdown/SIGKILL may leave test resources behind;
 there is no automatic garbage collector yet. Do not use `down` during active operations.
 
+### PDF reports (included by default)
+
+The shared Odoo/OpenCode image includes **wkhtmltopdf 0.12.6.1 (with patched Qt)**
+from upstream's `0.12.6.1-3` Bookworm packages, plus its runtime/font dependencies.
+There is no feature flag and no host installation is needed. Both `amd64` and
+`arm64` packages are pinned with SHA-256 checks; unsupported architectures fail
+the build rather than silently omitting report support. The build also checks
+the executable's version and patched-Qt marker.
+
+Odoo invokes this external executable to convert report HTML to PDF. The patched
+Qt build supports the headers and footers used by Odoo; the ordinary Debian
+`wkhtmltopdf` package is not a substitute. This follows the
+[Odoo dependency guidance](https://www.odoo.com/documentation/19.0/administration/on_premise/source.html#dependencies).
+The engine does not patch Odoo or enable unrestricted local-file access.
+
+Existing containers do not gain system packages from a host CLI upgrade or
+`odx deps`. After explicitly installing the updated engine, close clients and
+finish managed operations, then rebuild/recreate the selected instance:
+
+```sh
+odx down
+odx configure
+odx up --code # Omit --code if not using OpenCode; do not use --no-build here.
+odx run
+```
+
+This preserves volumes, databases, filestore and OpenCode state, without changing
+the configured Odoo/PostgreSQL/OpenCode versions. For checkout testing, prefix each
+command with `uv run --project /path/to/odoocker`. Repeat explicitly for other
+instances as needed. Odoo must be serving HTTP when a report fetches CSS/images;
+its report asset URL must be reachable **from inside the container**, not just
+from the host browser. Custom report/layout or asset-routing problems still
+require their own diagnosis.
+
 ### Initial profile limitations
 
-- It does not yet include wkhtmltopdf with patched Qt, rtlcss, or a browser for
-  tour tests. PDF/RTL/browser tests may fail because of these dependencies.
+- It does not yet include rtlcss or a browser for tour tests. RTL/browser tests
+  may fail because of these dependencies; PDF support is included as described above.
 - The limited smoke test does not replace the full Odoo or client test suite.
 - `deps` resolves discovered requirements together, using Odoo's requirements
   as constraints; this is not yet a reproducible locked installation.
