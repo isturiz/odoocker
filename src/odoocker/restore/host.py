@@ -14,6 +14,7 @@ from ..config import Workspace
 from ..errors import OdxError
 from ..locking import locked
 from ..maintenance import maintenance_process
+from ..reports import internal_url
 from ..runtime import PACKAGE, _literals, bind, compose_env, run_command, write_private
 from ..setup import GUARD
 from .archive import inventory
@@ -51,16 +52,23 @@ print(json.dumps({'database':exists,'filestore':(Path(o['data_dir'])/'filestore/
 
 FINALIZE = r"""
 import configparser,sys
+from pathlib import Path
 import psycopg2
+from odoocker.locking import locked
 c=configparser.ConfigParser(interpolation=None)
 c.read('/etc/odoocker/odoo.conf')
 o=c['options']
-with psycopg2.connect(host=o['db_host'],user=o['db_user'],
-                     password=o['db_password'],dbname='dev') as db:
-    with db.cursor() as cr:
-        for key,value in [('web.base.url',sys.argv[1]),('web.base.url.freeze','True')]:
-            cr.execute('INSERT INTO ir_config_parameter(key,value) VALUES (%s,%s) '
-                       'ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,value])
+with locked(Path('/var/lib/odoocker/environment.lock'),shared=True), \
+     locked(Path('/var/lib/odoocker/dev-database.lock')):
+    with psycopg2.connect(host=o['db_host'],port=o['db_port'],user=o['db_user'],
+                         password=o['db_password'],dbname='dev') as db:
+        with db.cursor() as cr:
+            for key,value in [('web.base.url',sys.argv[1]),('web.base.url.freeze','True'),
+                              ('report.url',sys.argv[2])]:
+                cr.execute('INSERT INTO ir_config_parameter(key,value) VALUES (%s,%s) '
+                           'ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value '
+                           'WHERE ir_config_parameter.value IS DISTINCT FROM EXCLUDED.value',
+                           [key,value])
 """
 
 CLEANUP_SQL = (PACKAGE / "restore/cleanup.py").read_text()
@@ -575,7 +583,19 @@ def restore(runtime, args):
                 scoped("stop", "--timeout", "30", "restore-worker", "restore-db", capture=True)
                 regular("start", "--wait", "--wait-timeout", "120", "db", "odoo", capture=True)
         url = runtime.url("odoo", 8069)
-        regular("exec", "-T", "odoo", "/opt/venv/bin/python", "-c", FINALIZE, url, capture=True)
+        report_config = configparser.ConfigParser(interpolation=None)
+        report_config.read(runtime.directory / "odoo.conf")
+        regular(
+            "exec",
+            "-T",
+            "odoo",
+            "/opt/venv/bin/python",
+            "-c",
+            FINALIZE,
+            url,
+            internal_url(report_config["options"]),
+            capture=True,
+        )
         access = {
             "login": record["admin"]["login"],
             "url": url,

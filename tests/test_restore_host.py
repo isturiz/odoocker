@@ -1,6 +1,7 @@
 """CLI and maintenance choreography, with every external process replaced."""
 
 import json
+import sys
 import zipfile
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -203,6 +204,90 @@ def test_host_restore_is_scoped_private_and_keeps_database_offline_until_worker_
     assert record["host_finalized"]
     assert result.stat().st_mode & 0o077 == 0
     assert not any("down" in c or "--volumes" in c or "--build" in c for c in calls)
+
+
+def test_restore_finalizes_public_and_internal_urls_separately(runtime, backup, processes):
+    calls, _ = processes
+    assert host.restore(runtime, args(backup)) == 0
+    finalize = next(c for c in calls if host.FINALIZE in c)
+    assert finalize[-2:] == ("http://127.0.0.1:53210", "http://127.0.0.1:8069")
+    assert calls.index(finalize) < next(i for i, c in enumerate(calls) if host.CLEANUP_SQL in c)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_finalize_script_sets_native_parameters_transactionally_under_leases(
+    tmp_path, monkeypatch, fail
+):
+    import configparser
+
+    import odoocker.locking
+
+    original = {
+        "web.base.url": "https://production.invalid",
+        "report.url": "https://production.invalid",
+    }
+    parameters = original.copy()
+    events = []
+
+    @contextmanager
+    def lease(path, **kwargs):
+        name = path.name
+        with locked(tmp_path / name, **kwargs):
+            events.append(name)
+            yield
+
+    class Database:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, kind, error, traceback):
+            if error:
+                parameters.clear()
+                parameters.update(original)
+
+        def cursor(self):
+            return self
+
+        def execute(self, query, values):
+            for name in ("environment.lock", "dev-database.lock"):
+                with pytest.raises(OdxError, match="Resource busy"), locked(tmp_path / name):
+                    pytest.fail("Finalization must hold native leases")
+            assert "WHERE ir_config_parameter.value IS DISTINCT FROM EXCLUDED.value" in query
+            parameters[values[0]] = values[1]
+            if fail and values[0] == "report.url":
+                raise OdxError("injected finalization failure")
+
+    def connect(**kwargs):
+        assert kwargs["dbname"] == "dev"
+        assert kwargs["port"] == "5432"
+        return Database()
+
+    def read(parser, path):
+        assert path == "/etc/odoocker/odoo.conf"
+        parser.read_string(
+            "[options]\ndb_host=db\ndb_port=5432\ndb_user=odoo\ndb_password=private\n"
+        )
+
+    monkeypatch.setattr(configparser.ConfigParser, "read", read)
+    monkeypatch.setattr(odoocker.locking, "locked", lease)
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
+    monkeypatch.setattr(
+        sys, "argv", ["finalize", "http://client-main.localhost:8080", "http://127.0.0.1:8069"]
+    )
+    if fail:
+        with pytest.raises(OdxError, match="injected finalization failure"):
+            exec(host.FINALIZE, {})
+        assert parameters == original
+    else:
+        exec(host.FINALIZE, {})
+        assert parameters == {
+            "web.base.url": "http://client-main.localhost:8080",
+            "web.base.url.freeze": "True",
+            "report.url": "http://127.0.0.1:8069",
+        }
+    assert events == ["environment.lock", "dev-database.lock"]
+    with locked(tmp_path / "environment.lock"), locked(tmp_path / "dev-database.lock"):
+        pass
 
 
 @pytest.mark.parametrize("dbfilter", ["^dev$", "^(dev|sandbox_[a-z0-9_]+)$", "^%d$", ""])

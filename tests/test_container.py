@@ -253,6 +253,14 @@ def test_module_names_rejects_invalid_or_command_like_input(value):
 def test_run_odoo_checks_readiness_holds_locks_and_returns_code(ready, monkeypatch, stop):
     calls = []
 
+    def prepare():
+        for filename in ("environment.lock", "dev-database.lock"):
+            with pytest.raises(OdxError, match="Resource busy"), locked(container.STATE / filename):
+                pytest.fail("Preparation must hold both locks")
+        return True
+
+    monkeypatch.setattr(container, "prepare_reports", prepare)
+
     def run(args, **kwargs):
         for filename in ("environment.lock", "dev-database.lock"):
             with pytest.raises(OdxError, match="Resource busy"), locked(container.STATE / filename):
@@ -301,6 +309,145 @@ def test_run_odoo_rejects_busy_resources(ready, filename):
     with locked(container.STATE / filename):
         with pytest.raises(OdxError, match="Resource busy"):
             container.run_odoo()
+
+
+@pytest.mark.parametrize("initialized", [False, True])
+def test_prepare_reports_uses_linux_worker_and_validates_response(monkeypatch, initialized):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(stdout=json.dumps({"initialized": initialized}))
+
+    monkeypatch.setattr(container, "run_command", run)
+    assert container.prepare_reports() is initialized
+    assert calls == [
+        (
+            [container.PYTHON, "-m", "odoocker.reports", "--config", container.CONFIG],
+            {"capture": True},
+        )
+    ]
+
+
+@pytest.mark.parametrize("response", ["bad", "{}", "[]", "null", '{"initialized": 1}'])
+def test_prepare_reports_rejects_invalid_worker_response(monkeypatch, response):
+    monkeypatch.setattr(container, "run_command", lambda *a, **kw: SimpleNamespace(stdout=response))
+    with pytest.raises(OdxError, match="Invalid development report"):
+        container.prepare_reports()
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_new_dev_initialization_configures_reports_before_http(ready, monkeypatch, stop):
+    events = []
+    responses = iter([False, True])
+
+    def prepare():
+        for filename in ("environment.lock", "dev-database.lock"):
+            with pytest.raises(OdxError, match="Resource busy"), locked(container.STATE / filename):
+                pytest.fail("Leases must cover every phase")
+        events.append("prepare")
+        return next(responses)
+
+    def run(args, **kwargs):
+        events.append(args)
+        assert kwargs == {"check": False}
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(container, "prepare_reports", prepare)
+    monkeypatch.setattr(container, "run_command", run)
+    assert container.run_odoo(install="base,web", update="base", stop=stop) == 0
+    base = [container.PYTHON, container.ODOO, "--config", container.CONFIG]
+    assert events[:3] == [
+        "prepare",
+        [*base, "--init", "base,web", "--update", "base", "--stop-after-init", "--no-http"],
+        "prepare",
+    ]
+    assert events[3:] == ([] if stop else [[*base, "--dev=all"]])
+
+
+def test_empty_dev_requires_explicit_initialization_without_starting_odoo(ready, monkeypatch):
+    monkeypatch.setattr(container, "prepare_reports", lambda: False)
+    with pytest.raises(OdxError, match="Initialize dev"):
+        container.run_odoo()
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_failed_initialization_does_not_prepare_again_or_start_server(ready, monkeypatch, stop):
+    events = []
+    monkeypatch.setattr(container, "prepare_reports", lambda: events.append("prepare") or False)
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda *a, **kw: events.append("odoo") or SimpleNamespace(returncode=7),
+    )
+    assert container.run_odoo(install="base", stop=stop) == 7
+    assert events == ["prepare", "odoo"]
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_successful_exit_without_initialized_schema_is_not_success(ready, monkeypatch, stop):
+    monkeypatch.setattr(container, "prepare_reports", lambda: False)
+    calls = []
+    monkeypatch.setattr(
+        container, "run_command", lambda *a, **kw: calls.append(a) or SimpleNamespace(returncode=0)
+    )
+    with pytest.raises(OdxError, match="dev is not initialized"):
+        container.run_odoo(install="base", stop=stop)
+    assert len(calls) == 1
+
+
+def test_preparation_failure_prevents_server_and_releases_leases(ready, monkeypatch):
+    def prepare():
+        raise OdxError("injected report failure")
+
+    monkeypatch.setattr(container, "prepare_reports", prepare)
+    with pytest.raises(OdxError, match="injected report failure"):
+        container.run_odoo()
+    with (
+        locked(container.STATE / "environment.lock"),
+        locked(container.STATE / "dev-database.lock"),
+    ):
+        pass
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_post_init_preparation_failure_does_not_start_http(ready, monkeypatch, stop):
+    calls = []
+    attempts = []
+
+    def prepare():
+        attempts.append(True)
+        if len(attempts) == 2:
+            raise OdxError("post-init report preparation failed")
+        return False
+
+    monkeypatch.setattr(container, "prepare_reports", prepare)
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kwargs: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    with pytest.raises(OdxError, match="post-init report preparation failed"):
+        container.run_odoo(install="base", stop=stop)
+    assert len(calls) == 1
+    assert calls[0][-2:] == ["--stop-after-init", "--no-http"]
+    with (
+        locked(container.STATE / "environment.lock"),
+        locked(container.STATE / "dev-database.lock"),
+    ):
+        pass
+
+
+def test_existing_offline_upgrade_reapplies_report_url_after_success(ready, monkeypatch):
+    events = []
+    monkeypatch.setattr(container, "prepare_reports", lambda: events.append("prepare") or True)
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda *a, **kw: events.append("odoo") or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo(update="base", stop=True) == 0
+    assert events == ["prepare", "odoo", "prepare"]
 
 
 @pytest.mark.parametrize("failure_at", [0, 1])
@@ -456,6 +603,11 @@ def test_run_tests_isolates_resources_retains_artifacts_and_returns_code(
 ):
     calls, processes = test_process(code=code)
     cleanup = []
+
+    def forbidden_preparation():
+        pytest.fail("Isolated tests must not prepare dev's report URL or fixed HTTP port")
+
+    monkeypatch.setattr(container, "prepare_reports", forbidden_preparation)
 
     def run(args, **kwargs):
         with (

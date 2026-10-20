@@ -119,11 +119,40 @@ def run_odoo(*, install=None, update=None, stop=False):
             args.extend(["--init", module_names(install)])
         if update:
             args.extend(["--update", module_names(update)])
+        initialized = prepare_reports()
         if stop:
-            args.extend(["--stop-after-init", "--no-http"])
-        else:
-            args.append("--dev=all")
-        return run_command(args, check=False).returncode
+            code = run_command([*args, "--stop-after-init", "--no-http"], check=False).returncode
+            if code == 0:
+                require_reports()
+            return code
+        if not initialized:
+            if not install:
+                raise OdxError(
+                    "Initialize dev with odx run --init base --stop-after-init, or restore a backup"
+                )
+            code = run_command([*args, "--stop-after-init", "--no-http"], check=False).returncode
+            if code:
+                return code
+            require_reports()
+            # Initialization/update flags were consumed by the successful offline phase.
+            args = [PYTHON, ODOO, "--config", CONFIG]
+        return run_command([*args, "--dev=all"], check=False).returncode
+
+
+def prepare_reports():
+    result = run_command([PYTHON, "-m", "odoocker.reports", "--config", CONFIG], capture=True)
+    try:
+        state = json.loads(result.stdout)
+        if type(state["initialized"]) is not bool:
+            raise ValueError("Invalid initialization state")
+        return state["initialized"]
+    except (ValueError, TypeError, KeyError) as error:
+        raise OdxError("Invalid development report preparation result") from error
+
+
+def require_reports():
+    if not prepare_reports():
+        raise OdxError("dev is not initialized; cannot prepare development report assets")
 
 
 def database_arguments(args):

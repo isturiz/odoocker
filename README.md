@@ -861,10 +861,36 @@ odx run
 This preserves volumes, databases, filestore and OpenCode state, without changing
 the configured Odoo/PostgreSQL/OpenCode versions. For checkout testing, prefix each
 command with `uv run --project /path/to/odoocker`. Repeat explicitly for other
-instances as needed. Odoo must be serving HTTP when a report fetches CSS/images;
-its report asset URL must be reachable **from inside the container**, not just
-from the host browser. Custom report/layout or asset-routing problems still
-require their own diagnosis.
+instances as needed.
+
+**Report assets are configured automatically for the managed `dev` database.**
+Before serving HTTP, `odx run` sets Odoo's native database parameter `report.url`
+to `http://127.0.0.1:<http_port>` (normally `8069`), so wkhtmltopdf fetches CSS and
+images from the Odoo process in its own container. It does not use the host's
+dynamic published port or Caddy's `*.localhost` route for these requests.
+`web.base.url` and `web.base.url.freeze` remain unchanged by `run`: the browser's
+address and report asset address are independent.
+
+This is automatic, with no feature flag or manual parameter setup. An existing
+`report.url` in `dev`, including a copied production URL, is replaced with the
+internal endpoint; an already correct value is left untouched. Configuration is
+applied under the managed environment/database leases, before loading the normal
+Odoo server, without an extra registry load, addon, Odoo patch or DNS override.
+No database is created by the parameter preparation itself. For an explicit first
+`run --init ...` on an absent/uninitialized `dev`, Odoo initializes natively with
+`--stop-after-init --no-http`; the engine then sets the parameter. Unless you also
+requested `--stop-after-init`, it starts the server without repeating the consumed
+install/update flags. Successful offline initializations/upgrades also recheck the
+parameter before returning. Failures do not continue to HTTP startup.
+
+Restore finalization sets the same internal `report.url` together with its usual
+local browser URL, before marking the host operation finalized or disposing of
+checkpoints. `setup` still does not create/initialize/change databases; `odx test`
+keeps its own isolated database and dynamically selected HTTP port, without running
+the `dev` parameter preparation. Other development copies and Odoo launches outside
+`odx run` are not automatically configured. Custom report/layout failures still
+require their own diagnosis. Adopt the updated **in-container** engine explicitly;
+upgrading only the host CLI does not change an already running container's `odx run`.
 
 ### Initial profile limitations
 

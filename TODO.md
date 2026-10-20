@@ -628,3 +628,49 @@ OpenCode. Do not automatically migrate or clean up existing environments.
   requests. This is not a full amd64 OpenCode/Odoo image or native Linux-host validation;
   client-specific/business reports and interactive browser printing remain unvalidated.
 - No installed/global CLI upgrade or existing client/container changes are included.
+
+## Automatic internal report asset URLs
+
+- [x] Prepare Odoo's native `report.url` automatically before managed `dev` HTTP
+  startup, deriving a loopback endpoint from the generated HTTP port, independently
+  from the browser/proxy URL. Preserve `web.base.url`, its freeze policy and unrelated
+  parameters; replace copied/stale report URLs and avoid rewriting a correct value.
+- [x] Limit preparation to an owned, connectable, initialized `dev` under the existing
+  environment/database leases, using the instance's Linux dependencies without loading
+  an extra Odoo registry. No schema/table/database creation, addon, DNS trick, core
+  patch, version-number branch, host credential argument or user feature flag.
+- [x] Handle explicit first initialization with Odoo's native offline CLI, set the
+  parameter after success, then optionally start HTTP without repeating installation
+  flags. Recheck successful offline runs; fail closed on preparation/init failures.
+  Keep setup and isolated tests outside this preparation path.
+- [x] Include the internal report URL in transactional restore host finalization,
+  under native leases and before finalized state/checkpoint cleanup. Keep the existing
+  public URL behavior and completion/resume ordering, without requiring the new helper
+  to be installed in an older support container used for a host-driven restore.
+- [x] 955 automated tests pass, covering target/schema/ownership guards, idempotence,
+  transaction rollback, worker protocol, native leases, offline initialization ordering,
+  preparation failures and test-path isolation. Ruff lint, formatting checks for all
+  changed Python files and Git whitespace checks pass; source/wheel builds and isolated
+  wheel verification include the report worker and restore finalizer. The four previously
+  recorded whole-repository formatting issues remain unrelated to this delivery.
+- [x] Live macOS arm64/Docker Desktop in new `report-url-smoke-17/19` workspaces:
+  setup leaves `dev` absent; Odoo 17's explicit offline initialization and Odoo 19's
+  initialize-and-serve path set the internal parameter before HTTP. Existing initialized
+  startup repairs a deliberately unreachable report URL while preserving the public
+  proxy URL, freeze flag and an unrelated marker.
+- [x] Download authenticated native QWeb PDFs through both dynamic host ports and
+  Caddy's stable routes. Verify the stylesheet's distinctive RGB color in the PDF
+  content stream, a PNG fetched over HTTP and body text, not merely a successful
+  download. Repeat after down/up with changed published ports; all parameter values
+  and row transaction identities remain unchanged on already-correct startup.
+- [x] Restore trusted native synthetic ZIPs containing a stale report URL with
+  `--replace` in both isolated workspaces. Confirm the internal parameter immediately
+  after host finalization, before any `run`, then verify styled PDFs through the
+  restored instance's direct host URL. Retain original ZIPs and previous destinations.
+- [x] Run one managed ACL smoke per release: both pass and clean their isolated
+  DB/filestore, use dynamic non-8069 HTTP ports and leave `dev` URL values/row identities
+  unchanged. Preserve private logs/PDFs/results; stop both validation workspaces without
+  deleting volumes. This is not an interactive browser/client-business-report review
+  or native Linux/amd64 validation.
+- No existing client workspace, installed/global CLI or running client service is
+  changed by this delivery. Adoption remains explicit.
