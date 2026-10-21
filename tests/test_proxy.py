@@ -154,12 +154,13 @@ def test_long_host_and_underscore_normalization(runtime):
 
 def test_both_services_refresh_and_remove_independently(runtime, monkeypatch):
     cli.main(["proxy", "start"])
-    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
-        stdout="odoo\nopencode\ndb\n"
-    ))
+    monkeypatch.setattr(
+        Runtime, "compose", lambda *a, **kw: SimpleNamespace(stdout="odoo\nopencode\ndb\n")
+    )
     proxy.register(runtime)
     assert set(proxy.load()["routes"]) == {
-        "client-main.localhost", "opencode-client-main.localhost"
+        "client-main.localhost",
+        "opencode-client-main.localhost",
     }
     monkeypatch.setattr(Runtime, "url", lambda *args: "http://127.0.0.1:49002")
     assert proxy.register(runtime, service="opencode") == (
@@ -184,7 +185,8 @@ def test_legacy_odoo_registry_remains_readable(runtime):
     cli.main(["proxy", "start"])
     state = proxy.load()
     state["routes"]["client-main.localhost"] = {
-        "project": runtime.project, "upstream": "127.0.0.1:49000"
+        "project": runtime.project,
+        "upstream": "127.0.0.1:49000",
     }
     proxy.save(state)
     assert proxy.url(runtime, "http://127.0.0.1:49000") is not None
@@ -249,10 +251,14 @@ def test_status_reports_stable_and_direct_url(runtime, monkeypatch, capsys):
     proxy.register(runtime)
     runtime.directory.mkdir(parents=True, exist_ok=True)
     runtime.compose_file.write_text("{}")
-    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
-        stdout='[{"Service": "odoo", "State": "running"},'
-        '{"Service": "opencode", "State": "running"}]'
-    ))
+    monkeypatch.setattr(
+        Runtime,
+        "compose",
+        lambda *a, **kw: SimpleNamespace(
+            stdout='[{"Service": "odoo", "State": "running"},'
+            '{"Service": "opencode", "State": "running"}]'
+        ),
+    )
     proxy.register(runtime, service="opencode")
     capsys.readouterr()
     cli._status(runtime, as_json=True)

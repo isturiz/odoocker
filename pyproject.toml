@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "odoocker"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Isolated Odoo development workspaces with OpenCode"
 requires-python = ">=3.12"
 dependencies = []
@@ -17,6 +17,12 @@ dev = ["pytest>=8,<9", "ruff>=0.11,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/odoocker"]
+
+[tool.hatch.version]
+path = "src/odoocker/__init__.py"
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/odoocker/__init__.py" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

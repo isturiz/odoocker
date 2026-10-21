@@ -86,9 +86,9 @@ def test_cli_refreshes_proxy_after_managed_lifecycle(host_runtime, monkeypatch, 
 
     calls = []
     monkeypatch.setattr(proxy, "sync", lambda *a, **kw: calls.append((a, kw)))
-    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(
-        returncode=0, stdout="[]"
-    ))
+    monkeypatch.setattr(
+        Runtime, "compose", lambda *a, **kw: SimpleNamespace(returncode=0, stdout="[]")
+    )
     monkeypatch.setattr(setup, "prepare", lambda *a, **kw: None)
     assert cli.main(host_args(host_runtime, action)) == 0
     assert len(calls) == 1

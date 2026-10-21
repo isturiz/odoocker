@@ -75,13 +75,15 @@ def document(state):
     routes = [
         {
             "match": [{"host": [host]}],
-            "handle": [{
-                "handler": "reverse_proxy",
-                "upstreams": [{"dial": route["upstream"]}],
-                # Flush event streams immediately; retain WebSockets during route reloads.
-                "flush_interval": -1,
-                "stream_close_delay": 300000000000,
-            }],
+            "handle": [
+                {
+                    "handler": "reverse_proxy",
+                    "upstreams": [{"dial": route["upstream"]}],
+                    # Flush event streams immediately; retain WebSockets during route reloads.
+                    "flush_interval": -1,
+                    "stream_close_delay": 300000000000,
+                }
+            ],
             "terminal": True,
         }
         for host, route in sorted(state["routes"].items())
@@ -164,9 +166,13 @@ def register(runtime, *, service=None):
         state = load()
         if state is None:
             raise OdxError("Proxy is not configured; first run odx proxy start")
-        services = [service] if service else runtime.compose(
-            "ps", "--status", "running", "--services", capture=True
-        ).stdout.split()
+        services = (
+            [service]
+            if service
+            else runtime.compose(
+                "ps", "--status", "running", "--services", capture=True
+            ).stdout.split()
+        )
         services = [name for name in SERVICES if name in services]
         if not services:
             raise OdxError("No running Odoo/OpenCode services; run odx up (with --code if needed)")
@@ -175,8 +181,7 @@ def register(runtime, *, service=None):
             host = hostname(runtime, name)
             previous = state["routes"].get(host)
             if previous and (
-                previous["project"] != runtime.project
-                or previous.get("service", "odoo") != name
+                previous["project"] != runtime.project or previous.get("service", "odoo") != name
             ):
                 raise OdxError(f"Proxy hostname already belongs to another instance: {host}")
             upstream = runtime.url(name, SERVICES[name]).removeprefix("http://")

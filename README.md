@@ -3,18 +3,25 @@
 Shared engine for **containerized Odoo development**. Each client declares
 its workspace instead of copying the engine's Dockerfile, Compose file, or scripts.
 
-Standalone prototype: it does not install global shell functions, modify Realista,
-or reuse its data. **The only supported assistant is OpenCode V2**, through
-`odx code opencode`. See [TODO.md](TODO.md) for pending work and validation records.
+For local development on macOS and Linux, **not production management**. The only
+supported assistant is **OpenCode V2**, through `odx code opencode`. Workspaces,
+private client configuration and data stay separate from the engine repository.
+Installing or updating the engine does not automatically migrate existing workspaces,
+recreate their containers, or modify shell functions and personal profiles.
 
-### Transition from the previous template
+## Contents
 
-`main` now contains the shared engine, not a template to copy for each client.
-The previous version is preserved on the
-[`legacy/copied-template`](https://github.com/isturiz/odoocker/tree/legacy/copied-template)
-branch, and its history remains part of this repository. This change does not
-automatically migrate or modify workspaces or containers created with that version.
-Private client configurations and data are not part of the engine.
+- [Requirements](#requirements)
+- [Install the CLI](#install-the-cli)
+- [Create a workspace](#create-a-workspace)
+- [Configuration](#configuration)
+- [Restore a development backup](#restore-a-development-backup)
+- [Multiple instances and agents](#multiple-instances-and-agents)
+- [Tests an agent can run](#tests-an-agent-can-run)
+- [PDF reports](#pdf-reports-included-by-default)
+- [Scope and limitations](#scope-and-limitations)
+- [Diagnostics and shutdown](#diagnostics-and-shutdown)
+- [Engine development](#engine-development)
 
 ## Requirements
 
@@ -23,10 +30,10 @@ Private client configurations and data are not part of the engine.
   the client must match. The host is not updated automatically.
 - Internet access for images, source code, and dependencies.
 
-The initial profile uses Python 3.12 and PostgreSQL 16; PostgreSQL 18 and pgvector
+The runtime uses Python 3.12 and PostgreSQL 16 by default; PostgreSQL 18 and pgvector
 can be selected per workspace. Each instance has its own Linux virtualenv. Base
-image versions are pinned by tag; digest pinning and source/dependency locking
-are still pending.
+image versions are pinned by tag, not digest; sources and workspace dependencies
+are not locked to exact revisions/resolutions.
 
 Odoo versions use the stable `MAJOR.0` format. **17.0 and 19.0 are live-validated,
 not an acceptance whitelist.** Other versions are accepted with a warning, not a
@@ -50,16 +57,9 @@ workspaces; there is no need to copy scripts per client or use `uv run` daily.
 If the tools directory is not on PATH, run `uv tool update-shell` and open a new
 terminal. Installing the CLI does not start or rebuild containers.
 
-If a Fish function named `odx` already exists, it takes precedence over the executable.
-Explicitly archive the previous helper and its completions outside autoload paths
-before adopting the new command. `functions --erase odx` only unloads the function
-from the current session: it does not remove its file. In the meantime,
-`command odx` runs the binary without going through the function.
-
-Also review aliases such as `odooctl` and wrappers such as `oc`: old helper syntax
-is not automatically translated. Restores now use the explicit `odx db restore`
-workflow below; `oc sync`/`update`/`pair` are not restored as aliases. An optional
-shortcut with no duplicated logic is:
+Shell aliases/functions can shadow the executable. Remove or rename conflicting
+helpers explicitly; in Fish, `command odx` bypasses a function named `odx`.
+The engine does not modify your shell configuration. An optional Fish shortcut is:
 
 ```fish
 function oc --wraps 'odx code opencode'
@@ -68,8 +68,9 @@ end
 ```
 
 To update an installation tracking `main`, use `uv tool upgrade odoocker`.
-Then explicitly apply the changes to each workspace with `down`,
-`configure`, and `up` (add `--code` if you use OpenCode), with no active operations.
+Then explicitly apply the changes to each idle workspace with `odx setup --code`
+(omit `--code` if not using OpenCode), or the individual `down`, `configure`, and
+`up` commands. Finish managed operations and close OpenCode clients first.
 This preserves volumes but does not migrate data between PostgreSQL versions.
 You can also install a specific revision using `@<commit>` instead of `@main`.
 
@@ -141,31 +142,29 @@ others must be updated explicitly before reconnecting with the newer host.
 Even with the same version, the command backs up and rebuilds so you can apply
 a new engine version or retry a failed update.
 
-## Try the checkout without replacing your current `odx`
-
-From this repository:
+## Create a workspace
 
 ```sh
-uv sync --group dev
-uv run odx --help
-
-uv run odx init ../workspaces/my-client --odoo 19.0
-uv run odx --workspace ../workspaces/my-client fetch
-uv run odx --workspace ../workspaces/my-client setup --code
-uv run odx --workspace ../workspaces/my-client run --init base --stop-after-init
-uv run odx --workspace ../workspaces/my-client code opencode --info
-uv run odx --workspace ../workspaces/my-client code opencode
+odx init /path/to/my-client --odoo 19.0
+cd /path/to/my-client
+odx fetch
+odx setup --code
+odx run --init base --stop-after-init
+odx code opencode --info
+odx code opencode
 ```
 
-In another terminal, `run` keeps Odoo in the foreground:
+Configure model credentials on the workspace's OpenCode server with `/connect`;
+host credentials are not copied. In another terminal in the workspace, `run`
+keeps Odoo in the foreground:
 
 ```sh
-uv run odx --workspace ../workspaces/my-client run
+odx run
 ```
 
 `status` shows the ports **actually assigned by Docker**. `up` prepares the
 containers; Odoo only starts listening for HTTP with `run`. The services do not use
-fixed host ports 8069/4097/5432.
+fixed host ports 8069/4096/5432.
 
 ### Stable browser URLs (optional)
 
@@ -241,8 +240,7 @@ From the workspace, you can also invoke the engine without installing it globall
 uv run --project /path/to/odoocker odx status
 ```
 
-There is no need to install the tool or replace `odx.fish`/`oc.fish` just to try
-the checkout. The `uv run` workflow remains useful when developing the engine.
+This uses the engine checkout without replacing the installed CLI or shell shortcuts.
 
 ### Initial setup in one command
 
@@ -300,13 +298,14 @@ also still require explicit isolation decisions.
 ### Reuse local sources without modifying them
 
 ```sh
-uv run odx init ../workspaces/my-client \
+odx init /path/to/my-client \
   --odoo 17.0 --source /path/to/odoo-17
 ```
 
 Core sources are mounted **read-only**. `fetch` clones them if missing and preserves
 any existing checkout: it does not pull, reset, switch branches, or install
-dependencies on the host. Automatic updates and commit locking are not available yet.
+dependencies on the host. Repository updates and revision selection are explicit
+user operations; `fetch` does not lock or update revisions.
 
 ## Configuration
 
@@ -338,7 +337,7 @@ url = "https://github.com/OCA/partner-contact.git"
 branch = "19.0"
 ```
 
-`[[addons]]` replaces the manual repository/path list. `odx fetch` clones any
+`[[addons]]` declares repositories and addon paths. `odx fetch` clones any
 missing declared repositories, and their paths are automatically added to
 `addons_path`. `odx fetch --dry-run` shows the plan without cloning or creating state.
 Each destination must be inside the workspace's `addons/` directory, with no
@@ -470,8 +469,9 @@ contains only container search paths, not copied skill content.
 
 See the official V2 [skills](https://opencode.ai/v2/docs/skills) and
 [configuration](https://opencode.ai/v2/docs/config) documentation for native
-discovery and precedence. Automated filesystem/Compose tests do not establish
-live discovery or read-only enforcement by Docker/OpenCode; see `TODO.md`.
+discovery and precedence. Skill discovery and permission enforcement depend on
+the pinned OpenCode release and host filesystem; check the loaded skills and
+supporting-file access inside the container after configuring shared sources.
 
 ### Odoo web database manager
 
@@ -556,7 +556,7 @@ For an existing development backup, use `odx db restore` as described below.
 
 `.odoocker/` contains local identity, secrets, and generated files; **do not copy,
 version, or delete it to clean an environment**: losing its identity leaves previous
-volumes unassociated. Moving a stateful workspace requires a future migration feature.
+volumes unassociated. Relocating a stateful workspace is not supported.
 PostgreSQL and OpenCode passwords are private and local to each instance.
 
 ## Restore a development backup
@@ -659,8 +659,8 @@ giving agents Docker access. Inventory shows PostgreSQL sizes (not filestore/WAL
 sizes), connection counts, protected databases and development/test/recovery names.
 The scope is **only the selected instance's PostgreSQL cluster**, not every Docker
 project. `--instance` and `--workspace` are host options; container context is fixed.
-After installing an engine release containing these commands, explicitly run
-`odx setup --code` in an idle workspace to prepare the matching in-container CLI;
+After updating the engine, explicitly run `odx setup --code` in an idle workspace
+to prepare the matching in-container CLI;
 upgrading the host CLI alone does not update running containers.
 
 `drop` accepts one exact name, never patterns or `--all`, and deletes **both the
@@ -782,8 +782,8 @@ directory; configurable UID/GID is not implemented.
 ## Multiple instances and agents
 
 ```sh
-uv run odx --workspace ../workspaces/my-client --instance invoice-task up
-uv run odx --workspace ../workspaces/my-client --instance invoice-task deps
+odx --instance invoice-task up
+odx --instance invoice-task deps
 ```
 
 Each instance has its own PostgreSQL, filestore, Python environment, network, and
@@ -791,9 +791,9 @@ OpenCode state. There is no global "active client" selector. Two workspaces with
 the same directory name do not share an identity either.
 
 **This does not create another copy of the code.** OpenCode retains its native
-worktree management. Full host/container Git path integration still needs validation;
-it is not presented as a finished feature. A worktree of the configuration does
-not create worktrees for external addons repositories either.
+worktree management; automatic host/container worktree path mapping is not guaranteed.
+A worktree of the configuration does not create worktrees for external addons
+repositories either.
 
 ## Tests an agent can run
 
@@ -808,7 +808,7 @@ odx test --module my_module --tags /my_module:MyClass
 The same interface is used from the host:
 
 ```sh
-uv run odx --workspace ../workspaces/my-client test \
+odx test \
   --module base --tags /base:TestACL.test_field_visibility_restriction
 ```
 
@@ -822,17 +822,17 @@ considered a success. Only that run's database and filestore are deleted, unless
 `--keep` is used; logs/results remain in the runtime volume:
 
 ```sh
-uv run odx --workspace ../workspaces/my-client logs --test ID
-uv run odx --workspace ../workspaces/my-client logs --test ID --result
+odx logs --test ID
+odx logs --test ID --result
 ```
 
 Locks prevent dependency installation while a managed Odoo operation uses the
 environment, and prevent two managed operations from running against `dev`.
 They do not coordinate external processes or prevent two agents from editing the
 same file. A forced Docker shutdown/SIGKILL may leave test resources behind;
-there is no automatic garbage collector yet. Do not use `down` during active operations.
+there is no automatic garbage collector. Do not use `down` during active operations.
 
-### PDF reports (included by default)
+## PDF reports (included by default)
 
 The shared Odoo/OpenCode image includes **wkhtmltopdf 0.12.6.1 (with patched Qt)**
 from upstream's `0.12.6.1-3` Bookworm packages, plus its runtime/font dependencies.
@@ -892,32 +892,34 @@ the `dev` parameter preparation. Other development copies and Odoo launches outs
 require their own diagnosis. Adopt the updated **in-container** engine explicitly;
 upgrading only the host CLI does not change an already running container's `odx run`.
 
-### Initial profile limitations
+## Scope and limitations
 
-- It does not yet include rtlcss or a browser for tour tests. RTL/browser tests
-  may fail because of these dependencies; PDF support is included as described above.
-- The limited smoke test does not replace the full Odoo or client test suite.
+- This is a local development engine, not a production manager or migration tool.
+  Host/container integration is live-validated on macOS arm64 with Docker Desktop
+  for Odoo 17/19. Linux host permissions and native amd64 behavior are not covered
+  by that validation; the PDF runtime layer has also been exercised under amd64 emulation.
+- The image does not include rtlcss or a browser for tour tests. RTL/browser tests
+  require additional dependencies; PDF support is included as described above.
+- Targeted integration checks do not replace the full Odoo or client test suite,
+  or validation of every pinned OpenCode release and provider configuration.
 - `deps` resolves discovered requirements together, using Odoo's requirements
-  as constraints; this is not yet a reproducible locked installation.
+  as constraints; it is not a reproducible locked installation.
 - Change detection uses direct requirements; changes to `-r` includes must be
   applied by running `deps` explicitly.
 - PostgreSQL is not exposed to the host. The included client matches the server's
-  major version (16/18). Restore supports trusted native Odoo SQL ZIPs; an integrated
-  backup command, custom-format imports and cleanup of older/previous-destination
-  copies remain pending.
+  major version (16/18). Restore accepts trusted native Odoo SQL ZIPs, not custom-format
+  imports. There is no integrated backup command. Recovery copies from older restores
+  and previous destinations retained by `--replace` are kept for explicit maintenance.
 - The image uses UID/GID 1000. On Linux, editable directories must allow that user
-  to write; configurable UID/GID is still pending.
-- Model credentials are configured on the new server with `/connect`;
-  host credentials are not copied. An interactive conversation authenticated
-  with a provider has not been tested yet.
+  to write; UID/GID are not configurable.
 
 ## Diagnostics and shutdown
 
 ```sh
-uv run odx --workspace ../workspaces/my-client status --json
-uv run odx --workspace ../workspaces/my-client doctor
-uv run odx --workspace ../workspaces/my-client logs opencode
-uv run odx --workspace ../workspaces/my-client down
+odx status --json
+odx doctor
+odx logs opencode
+odx down
 ```
 
 `down` removes **this instance's** containers and network, preserving all its
@@ -934,5 +936,21 @@ uv run ruff format --check .
 uv build
 ```
 
-Unit tests do not need Docker or credentials. Live checks and their limitations
-are recorded separately in `TODO.md`.
+Unit tests do not need Docker or credentials. Live checks must use dedicated
+development workspaces and must not modify existing client environments. Report
+automated checks separately from live validation; see [scope and limitations](#scope-and-limitations).
+
+### Versioning
+
+`src/odoocker/__init__.py` is the single source for the engine version. Hatch reads
+it for distribution metadata; the CLI and generated runtime images use the same
+value without requiring installed package metadata inside containers.
+uv tracks that source file when caching local build metadata, so changing only
+the version also refreshes the editable installation's package metadata.
+
+Increment the engine version once per completed change delivery, unless explicitly
+agreed otherwise: patch for fixes/maintenance, minor for compatible features.
+Document incompatible changes and their release version explicitly. After changing
+the source version, run `uv lock` and the checks above; verify the built package
+version and `odx --version` agree. Odoo/PostgreSQL/OpenCode pins are independent.
+Commits, release tags and publication are separate, explicitly authorized actions.

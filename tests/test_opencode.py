@@ -12,6 +12,7 @@ from odoocker.errors import OdxError
 @pytest.fixture(autouse=True)
 def no_external_processes(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
+
     def forbidden(*args, **kwargs):
         pytest.fail("Unit tests must not invoke the real OpenCode client")
 
@@ -248,9 +249,11 @@ def test_active_proxy_is_used_with_original_authentication(runtime, monkeypatch,
         return "http://opencode-test-feature.localhost:8080"
 
     monkeypatch.setattr(opencode.proxy, "register", register)
-    monkeypatch.setattr(opencode, "run_command", lambda *a, **kw: (
-        calls.append((a, kw)) or SimpleNamespace(returncode=0)
-    ))
+    monkeypatch.setattr(
+        opencode,
+        "run_command",
+        lambda *a, **kw: calls.append((a, kw)) or SimpleNamespace(returncode=0),
+    )
     if operation == "connect":
         opencode.connect(runtime, [])
     else:
