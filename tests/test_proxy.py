@@ -19,9 +19,16 @@ native_caddy = proxy.caddy
 def isolated_proxy(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "shared"))
     monkeypatch.delenv("ODOOCKER_CONTAINER", raising=False)
-    monkeypatch.setattr(proxy, "running", lambda: False)
     calls = []
-    monkeypatch.setattr(proxy, "caddy", lambda *args: calls.append(args))
+    state = {"running": False}
+    monkeypatch.setattr(proxy, "running", lambda: state["running"])
+
+    def caddy(*args):
+        calls.append(args)
+        if args[0] in ("start", "stop"):
+            state["running"] = args[0] == "start"
+
+    monkeypatch.setattr(proxy, "caddy", caddy)
     return calls
 
 
@@ -36,7 +43,7 @@ def runtime(tmp_path, monkeypatch):
 
 def test_global_start_needs_no_workspace_and_is_idempotent(isolated_proxy, monkeypatch):
     assert cli.main(["proxy", "start"]) == 0
-    assert proxy.load() == {"schema": 1, "port": 8080, "routes": {}}
+    assert proxy.load() == {"schema": 1, "port": 8080, "enabled": True, "routes": {}}
     assert isolated_proxy[0][0] == "start"
     monkeypatch.setattr(proxy, "running", lambda: True)
     assert cli.main(["proxy", "start"]) == 0
@@ -44,11 +51,55 @@ def test_global_start_needs_no_workspace_and_is_idempotent(isolated_proxy, monke
     assert cli.main(["proxy", "start", "--port", "8081"]) == 1
 
 
-def test_proxy_is_opt_in(runtime):
-    proxy.sync(runtime)
-    assert not (proxy.directory() / "routes.json").exists()
-    with pytest.raises(OdxError, match="not configured"):
-        proxy.register(runtime)
+def test_proxy_starts_and_registers_without_prior_configuration(runtime, isolated_proxy):
+    assert proxy.sync(runtime) == "http://client-main.localhost:8080"
+    assert proxy.running()
+    assert isolated_proxy[0][0] == "start"
+    assert proxy.load()["routes"]["client-main.localhost"]["project"] == runtime.project
+
+
+def test_stopped_proxy_restarts_with_existing_port_and_routes(runtime, isolated_proxy):
+    cli.main(["proxy", "start", "--port", "8088"])
+    proxy.register(replace(runtime, instance="other"))
+    proxy.caddy("stop")  # Simulate a stopped process without disabling automatic startup.
+    assert proxy.sync(runtime) == "http://client-main.localhost:8088"
+    assert isolated_proxy[-1][0] == "start"
+    assert proxy.load()["port"] == 8088
+    assert len(proxy.load()["routes"]) == 2
+
+
+def test_disabled_proxy_stays_disabled_until_explicit_start(runtime, isolated_proxy):
+    assert cli.main(["proxy", "stop"]) == 0
+    before = proxy.load()
+    calls = len(isolated_proxy)
+    assert proxy.sync(runtime) is None
+    assert proxy.load() == before
+    assert len(isolated_proxy) == calls
+    assert not proxy.running()
+    assert cli.main(["proxy", "start"]) == 0
+    assert proxy.sync(runtime) == "http://client-main.localhost:8080"
+
+
+def test_missing_caddy_or_busy_port_preserves_registry_and_direct_access(
+    runtime, monkeypatch, capsys
+):
+    cli.main(["proxy", "start"])
+    before = proxy.load()
+    monkeypatch.setattr(proxy, "running", lambda: False)
+
+    def fail(*args):
+        raise OdxError("Caddy could not start (missing binary or port busy)")
+
+    monkeypatch.setattr(proxy, "caddy", fail)
+    assert proxy.sync(runtime) is None
+    assert proxy.load() == before
+    assert "Direct access remains available" in capsys.readouterr().err
+
+
+def test_down_does_not_start_or_enable_proxy(runtime, isolated_proxy):
+    assert proxy.sync(runtime, remove=True) is None
+    assert proxy.load() is None
+    assert not isolated_proxy
 
 
 def test_routes_survive_port_changes_and_remove_only_their_owner(runtime, monkeypatch):
@@ -184,6 +235,7 @@ def test_registration_without_opencode_removes_its_stale_route(runtime):
 def test_legacy_odoo_registry_remains_readable(runtime):
     cli.main(["proxy", "start"])
     state = proxy.load()
+    del state["enabled"]
     state["routes"]["client-main.localhost"] = {
         "project": runtime.project,
         "upstream": "127.0.0.1:49000",
@@ -192,6 +244,16 @@ def test_legacy_odoo_registry_remains_readable(runtime):
     assert proxy.url(runtime, "http://127.0.0.1:49000") is not None
     proxy.register(runtime, service="opencode")
     assert len(proxy.load()["routes"]) == 2
+
+
+def test_invalid_enabled_flag_is_not_overwritten(runtime):
+    cli.main(["proxy", "start"])
+    file = proxy.directory() / "routes.json"
+    state = proxy.load()
+    state["enabled"] = "false"
+    file.write_text(json.dumps(state))
+    assert proxy.sync(runtime) is None
+    assert json.loads(file.read_text()) == state
 
 
 def test_cross_service_hostname_collision_is_not_overwritten(runtime):
@@ -260,6 +322,7 @@ def test_status_reports_stable_and_direct_url(runtime, monkeypatch, capsys):
         ),
     )
     proxy.register(runtime, service="opencode")
+    monkeypatch.setattr(proxy, "running", lambda: False)
     capsys.readouterr()
     cli._status(runtime, as_json=True)
     info = json.loads(capsys.readouterr().out)

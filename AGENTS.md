@@ -29,6 +29,7 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 - Add adapters only for actual needs; no plugin framework or generic orchestrator.
 - Keep README instructions and current limitations accurate; do not recreate a delivery
   log or speculative backlog. Distinguish automated tests from live validation in summaries.
+- Record version-specific changes and compatibility notes in `CHANGELOG.md`, not README.
 
 ## Versioning
 

@@ -32,7 +32,8 @@ def runtime(tmp_path):
         return "http://127.0.0.1:49152"
 
     return SimpleNamespace(
-        workspace=SimpleNamespace(root=tmp_path, opencode_version="2.0.30"),
+        workspace=SimpleNamespace(root=tmp_path, name="test", opencode_version="2.0.30"),
+        instance="feature",
         password="test-only-private-password",
         project="odx-test-feature",
         compose=compose,
@@ -179,7 +180,9 @@ def test_connect_uses_authenticated_explicit_server_and_isolated_client_state(
     assert options["check"] is False
     assert options["cwd"] == runtime.workspace.root
     assert opencode.os.environ["OPENCODE_PASSWORD"] == "unrelated-host-password"
-    assert not home.exists()
+    for root in roots.values():
+        assert not (root / "odoocker-clients").exists()
+    assert not (home / ".local/share/opencode").exists()
 
 
 def test_connect_isolates_different_instance_state(runtime, tmp_path, monkeypatch):
@@ -265,20 +268,34 @@ def test_active_proxy_is_used_with_original_authentication(runtime, monkeypatch,
     assert options["env"]["OPENCODE_PASSWORD"] == runtime.password
 
 
-def test_stopped_proxy_warns_and_uses_direct_port(runtime, monkeypatch, capsys):
-    monkeypatch.setattr(opencode.proxy, "load", lambda: {"schema": 1})
-    monkeypatch.setattr(opencode.proxy, "running", lambda: False)
+def test_unavailable_proxy_warns_and_uses_direct_port(runtime, capsys):
     assert opencode.server_url(runtime) == "http://127.0.0.1:49152"
-    assert "using the direct OpenCode port" in capsys.readouterr().err
+    assert "Direct access remains available" in capsys.readouterr().err
 
 
-def test_active_proxy_failure_does_not_silently_select_unstable_port(runtime, monkeypatch):
-    monkeypatch.setattr(opencode.proxy, "load", lambda: {"schema": 1})
+def test_active_proxy_failure_warns_and_falls_back_to_direct_port(runtime, monkeypatch, capsys):
     monkeypatch.setattr(opencode.proxy, "running", lambda: True)
 
     def fail(*a, **kw):
         raise OdxError("reload failed")
 
     monkeypatch.setattr(opencode.proxy, "register", fail)
-    with pytest.raises(OdxError, match="reload failed"):
-        opencode.server_url(runtime)
+    assert opencode.server_url(runtime) == "http://127.0.0.1:49152"
+    assert "reload failed" in capsys.readouterr().err
+
+
+def test_connection_starts_and_registers_proxy_automatically(runtime, monkeypatch):
+    calls = []
+    state = {"running": False}
+    monkeypatch.setattr(opencode.proxy, "running", lambda: state["running"])
+
+    def caddy(*args):
+        calls.append(args)
+        state["running"] = True
+
+    monkeypatch.setattr(opencode.proxy, "caddy", caddy)
+    assert opencode.server_url(runtime) == "http://opencode-test-feature.localhost:8080"
+    assert calls[0][0] == "start"
+    route = opencode.proxy.load()["routes"]["opencode-test-feature.localhost"]
+    assert route["upstream"] == "127.0.0.1:49152"
+    assert route["service"] == "opencode"

@@ -9,6 +9,7 @@ import sys
 import uuid
 import zipfile
 
+from .. import proxy
 from ..adapters.opencode_update import active_sessions
 from ..config import Workspace
 from ..errors import OdxError
@@ -582,7 +583,7 @@ def restore(runtime, args):
                 # A failed stop prevents the normal PostgreSQL from starting.
                 scoped("stop", "--timeout", "30", "restore-worker", "restore-db", capture=True)
                 regular("start", "--wait", "--wait-timeout", "120", "db", "odoo", capture=True)
-        url = runtime.url("odoo", 8069)
+        url = proxy.sync(runtime, service="odoo") or runtime.url("odoo", 8069)
         report_config = configparser.ConfigParser(interpolation=None)
         report_config.read(runtime.directory / "odoo.conf")
         regular(
@@ -607,6 +608,7 @@ def restore(runtime, args):
             regular("start", "--wait", "--wait-timeout", "120", "opencode", capture=True)
         record["host_finalized"] = True
         save()
+        proxy.sync(runtime)
         cleanup_sql(runtime, directory, record)
         cleanup_checkpoints(runtime, directory, record)
         print(f"Restored dev; {record['verified_attachments']} attachments verified. Run odx run.")

@@ -80,7 +80,7 @@ def test_only_explicit_opencode_assistant_is_accepted():
     assert args.args == ["--", "--model", "example/model"]
 
 
-@pytest.mark.parametrize("action", ["up", "down", "setup"])
+@pytest.mark.parametrize("action", ["up", "down", "setup", "run"])
 def test_cli_refreshes_proxy_after_managed_lifecycle(host_runtime, monkeypatch, action):
     from odoocker import proxy, setup
 
@@ -94,6 +94,17 @@ def test_cli_refreshes_proxy_after_managed_lifecycle(host_runtime, monkeypatch, 
     assert len(calls) == 1
     assert calls[0][0][0].project == host_runtime.project
     assert calls[0][1] == ({"remove": True} if action == "down" else {})
+
+
+def test_status_does_not_start_or_register_proxy(host_runtime, monkeypatch):
+    from odoocker import proxy
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("status must be read-only")
+
+    monkeypatch.setattr(proxy, "sync", forbidden)
+    monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(stdout="[]"))
+    assert cli.main(host_args(host_runtime, "status")) == 0
 
 
 @pytest.mark.parametrize("argv", [["code"], ["code", "claude"], ["code", "codex"], ["opencode"]])
@@ -465,6 +476,9 @@ def test_container_database_dispatch_without_docker(monkeypatch, argv):
 
 @pytest.mark.parametrize("tty", [False, True])
 def test_host_run_preserves_flags_and_tty(host_runtime, docker_calls, monkeypatch, tty):
+    from odoocker import proxy
+
+    monkeypatch.setattr(proxy, "sync", lambda *a, **kw: None)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: tty)
     assert (
         cli.main(

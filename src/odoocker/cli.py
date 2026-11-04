@@ -36,11 +36,13 @@ def parser():
         "--instance", default="main", help="Explicit runtime instance (default: main)"
     )
     commands = result.add_subparsers(dest="command", required=True)
-    proxy = commands.add_parser("proxy", help="Manage the optional shared local Caddy proxy")
+    proxy = commands.add_parser("proxy", help="Manage the automatic shared local Caddy proxy")
     proxies = proxy.add_subparsers(dest="proxy_command", required=True)
-    start = proxies.add_parser("start", help="Start Caddy and enable automatic Odoo routes")
+    start = proxies.add_parser(
+        "start", help="Start Caddy and enable automatic Odoo/OpenCode routes"
+    )
     start.add_argument("--port", type=int, help="Initial loopback port (default: 8080)")
-    proxies.add_parser("stop", help="Stop only the odx-owned proxy; retain its routes")
+    proxies.add_parser("stop", help="Disable automatic startup and stop only the odx-owned proxy")
     proxies.add_parser("status", help="Show proxy state and registered routes")
     proxies.add_parser("register", help="Refresh the running instance's Odoo/OpenCode routes")
     remove = proxies.add_parser("remove", help="Remove one exact stale hostname")
@@ -455,6 +457,10 @@ def host(args):
     if args.command == "deps":
         return runtime.compose("exec", "-T", "odoo", "odx", "deps", check=False).returncode
     if args.command == "run":
+        from . import proxy
+
+        with locked(runtime.operation_lock):
+            proxy.sync(runtime)
         command = ["exec"]
         if not sys.stdin.isatty():
             command.append("-T")

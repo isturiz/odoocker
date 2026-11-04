@@ -2,7 +2,6 @@
 
 import os
 import re
-import sys
 from pathlib import Path
 
 from .. import proxy
@@ -38,16 +37,7 @@ def verify(runtime):
 
 def server_url(runtime):
     direct = runtime.url("opencode", 4096)
-    if proxy.load() is None:
-        return direct
-    if not proxy.running():
-        print(
-            "odx: proxy is stopped; using the direct OpenCode port. "
-            "Run odx proxy start before connecting for a stable URL.",
-            file=sys.stderr,
-        )
-        return direct
-    return proxy.register(runtime, service="opencode")
+    return proxy.sync(runtime, service="opencode") or direct
 
 
 def connect(runtime, args):

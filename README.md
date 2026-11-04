@@ -22,6 +22,7 @@ recreate their containers, or modify shell functions and personal profiles.
 - [Scope and limitations](#scope-and-limitations)
 - [Diagnostics and shutdown](#diagnostics-and-shutdown)
 - [Engine development](#engine-development)
+- [Changelog](CHANGELOG.md)
 
 ## Requirements
 
@@ -166,17 +167,16 @@ odx run
 containers; Odoo only starts listening for HTTP with `run`. The services do not use
 fixed host ports 8069/4096/5432.
 
-### Stable browser URLs (optional)
+### Stable browser URLs (automatic)
 
-The engine can manage **one native Caddy process shared by all workspaces**.
+The engine automatically manages **one native Caddy process shared by all workspaces**.
 Install Caddy separately (on macOS, `brew install caddy`; on Linux, use Caddy's
 official installation instructions). No system service, root privileges, Docker
 socket, certificates, external DNS, or `/etc/hosts` changes are needed.
 
 ```sh
-odx proxy start                 # Once per host session, from any directory
 cd /path/to/client
-odx proxy register              # Register an already-prepared running instance
+odx up --code                   # Starts the proxy and registers running services
 odx status                     # Includes odoo_proxy_url and the direct odoo_url
 ```
 
@@ -186,42 +186,57 @@ For a workspace named `client`, instance `main`, the stable URL is:
 http://client-main.localhost:8080
 ```
 
-After the first `proxy start`, `up`, `setup`, and successful OpenCode updates
-automatically refresh the selected instance's running Odoo/OpenCode routes. `down`
-removes only that instance's routes, not the shared proxy. Odoo still needs `odx run`
-to serve HTTP; start OpenCode with `up --code` or `setup --code`.
-Existing workspaces are not discovered or changed automatically: use `register`
+`up`, `setup`, `run`, successful restores, and successful OpenCode updates start
+the proxy when needed and refresh the selected instance's running Odoo/OpenCode
+routes. OpenCode connections (`odx code opencode`, including `--info`) also start
+the proxy and refresh their own route. No initial `proxy start` or `proxy register`
+is required. After a host reboot, the next such command starts Caddy again; no
+OS startup service is installed. `status` remains read-only.
+
+`down` removes only that instance's routes, not the shared proxy. Odoo still needs
+`odx run` to serve HTTP; start OpenCode with `up --code` or `setup --code`.
+Other workspaces are not discovered or changed automatically: use `register`
 or their next normal startup. Instances keep separate hostnames and browser cookies.
+
+To keep direct-port-only access, run `odx proxy stop`: this
+persistently disables automatic startup for all workspaces on this host until
+`odx proxy start` explicitly re-enables it. A stopped process alone (for example,
+after a reboot) does not disable automatic startup.
 
 ```sh
 odx --instance testing proxy register
 odx proxy status
-odx proxy stop                 # Stop only this proxy; preserve routes and opt-in
-odx proxy start                # Restart it, including after a host reboot
+odx proxy stop                 # Disable automatic startup; stop only this proxy
+odx proxy start                # Re-enable automatic startup; retain existing routes
 odx proxy remove client-testing.localhost  # Remove one exact stale route
 ```
 
 - Caddy listens only on `127.0.0.1`, HTTP, default port **8080**. Choose a different
-  unprivileged port on the first start with `--port 8088`; it stays fixed afterward.
+  unprivileged port with `odx proxy start --port 8088` before the first automatic
+  startup; it stays fixed afterward.
 - State and private logs live under `${XDG_DATA_HOME:-~/.local/share}/odoocker/proxy/`.
   Its admin API uses a Unix socket inside that private directory; an unrelated
   Caddy service/profile is never stopped or reconfigured.
 - Names use `<workspace>-<instance>.localhost`, normalizing underscores to hyphens.
   The combined DNS label must fit in 63 characters; collisions are rejected rather
   than reassigned. Give simultaneous workspaces distinct names.
-- Route updates are locked across workspaces and Caddy reloads atomically. Proxy
-  failures produce warnings without hiding a successful Docker operation. Retry
-  with `proxy register`; direct access remains available when Caddy is unavailable.
+- Route updates are locked across workspaces and Caddy reloads atomically. Missing
+  Caddy, occupied ports, or other proxy failures produce warnings without hiding a
+  successful Docker operation or restore. Retry with the next startup command or
+  `proxy register`; direct access remains available. Caddy is never installed
+  automatically.
 - Use `odx` for container recreation: external Docker changes do not refresh routes.
   Remove routes for abandoned workspaces explicitly; there is no Docker discovery.
-- OpenCode uses `http://opencode-<workspace>-<instance>.localhost:8080`.
-  `odx code opencode` and `--info` refresh and select that stable route when the
-  proxy is active, retaining the instance password and isolated client state.
-  With no proxy configured they use the direct port; a stopped proxy produces a
-  warning and direct-port fallback. Start the proxy **before opening the client**
-  to benefit from the stable URL. Already-open direct connections must be relaunched
-  once after adopting it. Refreshes require `odx` startup commands or explicit
-  `proxy register` if containers are recreated externally.
+- OpenCode uses `http://opencode-<workspace>-<instance>.localhost:8080`, retaining
+  the instance password and isolated client state. Connections use the direct port
+  if the proxy is disabled or fails to start/refresh (with a warning on failure).
+  Already-open direct connections must be relaunched once after adopting stable
+  URLs. Refreshes require `odx` startup commands or explicit `proxy register` if
+  containers are recreated externally.
+- Successful restores use the stable Odoo URL for `web.base.url` and `access.json`
+  when proxy registration succeeds, otherwise the direct URL. The internal
+  `report.url` remains separate. Resuming an already-finalized restore only retries
+  pending cleanup; it does not change URLs or restart the proxy.
 - The proxy preserves the HTTP Host and authentication headers, immediately flushes
   event streams, and supports WebSocket upgrades (with a five-minute close delay
   during configuration reloads). The stable URL survives server port changes, but

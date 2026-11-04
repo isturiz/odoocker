@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from odoocker import cli
+from odoocker import cli, proxy
 from odoocker.config import MANIFEST, Workspace
 from odoocker.errors import OdxError
 from odoocker.locking import locked
@@ -212,6 +212,47 @@ def test_restore_finalizes_public_and_internal_urls_separately(runtime, backup, 
     finalize = next(c for c in calls if host.FINALIZE in c)
     assert finalize[-2:] == ("http://127.0.0.1:53210", "http://127.0.0.1:8069")
     assert calls.index(finalize) < next(i for i, c in enumerate(calls) if host.CLEANUP_SQL in c)
+
+
+@pytest.mark.parametrize("mode", ["available", "disabled", "unavailable"])
+def test_restore_automatically_registers_and_uses_only_usable_browser_urls(
+    runtime, backup, processes, monkeypatch, capsys, mode
+):
+    calls, state = processes
+    state.running.append("opencode")
+    proxy_calls = []
+    caddy_state = {"running": False}
+    monkeypatch.setattr(proxy, "running", lambda: caddy_state["running"])
+
+    def caddy(*args):
+        proxy_calls.append(args)
+        if mode == "unavailable":
+            raise OdxError("Port 8080 is occupied")
+        caddy_state["running"] = args[0] != "stop"
+
+    monkeypatch.setattr(proxy, "caddy", caddy)
+    if mode == "disabled":
+        cli.main(["proxy", "stop"])
+    assert host.restore(runtime, args(backup)) == 0
+    url = (
+        "http://restore-fixture-main.localhost:8080"
+        if mode == "available"
+        else "http://127.0.0.1:53210"
+    )
+    finalize = next(c for c in calls if host.FINALIZE in c)
+    assert finalize[-2:] == (url, "http://127.0.0.1:8069")
+    access = next((runtime.directory / "restores").glob("*/access.json"))
+    assert json.loads(access.read_text())["url"] == url
+    if mode == "available":
+        assert proxy_calls[0][0] == "start"
+        assert set(proxy.load()["routes"]) == {
+            "restore-fixture-main.localhost",
+            "opencode-restore-fixture-main.localhost",
+        }
+    elif mode == "disabled":
+        assert not proxy_calls
+    else:
+        assert "Port 8080 is occupied" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("fail", [False, True])

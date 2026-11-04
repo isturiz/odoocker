@@ -1,4 +1,4 @@
-"""Opt-in host Caddy, shared by workspaces without Docker socket access."""
+"""Automatic host Caddy, shared by workspaces without Docker socket access."""
 
 import http.client
 import json
@@ -54,6 +54,7 @@ def load():
             or type(state["port"]) is not int
             or not 1024 <= state["port"] <= 65535
             or not isinstance(state["routes"], dict)
+            or type(state.get("enabled", True)) is not bool
         ):
             raise ValueError("Invalid proxy settings")
         for host, route in state["routes"].items():
@@ -144,7 +145,7 @@ def save(state, *, start=False):
     root.chmod(0o700)
     candidate = root / "candidate.json"
     write_private(candidate, json.dumps(document(state), indent=2))
-    if start or running():
+    if state.get("enabled", True) and (start or running()):
         if running():
             caddy("reload", "--config", str(candidate), "--address", f"unix/{root / 'admin.sock'}")
         else:
@@ -163,9 +164,9 @@ def hostname(runtime, service="odoo"):
 
 def register(runtime, *, service=None):
     with locked(directory() / "proxy.lock"):
-        state = load()
-        if state is None:
-            raise OdxError("Proxy is not configured; first run odx proxy start")
+        state = load() or {"schema": 1, "port": 8080, "enabled": True, "routes": {}}
+        if not state.get("enabled", True):
+            return None
         services = (
             [service]
             if service
@@ -196,9 +197,7 @@ def register(runtime, *, service=None):
             or (service and value.get("service", "odoo") != service)
         }
         state["routes"].update(routes)
-        save(state)
-        if not running():
-            print("odx: proxy is stopped; run odx proxy start", file=sys.stderr)
+        save(state, start=True)
         return f"http://{hostname(runtime, services[0])}:{state['port']}"
 
 
@@ -214,18 +213,25 @@ def unregister(runtime):
             save(state)
 
 
-def sync(runtime, *, remove=False):
-    """Proxy errors must not disguise the outcome of a successful Docker operation."""
-    if not (directory() / "routes.json").exists():
-        return
+def sync(runtime, *, remove=False, service=None):
+    """Ensure routes and Caddy; return a usable URL without failing the main operation."""
     try:
         if remove:
             unregister(runtime)
         else:
-            register(runtime)
-    except OdxError as error:
+            stable = register(runtime, service=service)
+            if stable:
+                if not running():
+                    raise OdxError("Caddy started but its admin API is unavailable")
+                return stable
+    except (OdxError, OSError) as error:
         recovery = "odx proxy remove HOSTNAME" if remove else "odx proxy register"
-        print(f"odx: proxy route update failed: {error}; retry with {recovery}", file=sys.stderr)
+        print(
+            f"odx: proxy route update failed: {error}; retry with {recovery}. "
+            "Direct access remains available; odx proxy stop disables automatic startup.",
+            file=sys.stderr,
+        )
+    return None
 
 
 def url(runtime, direct, service="odoo"):
@@ -249,7 +255,8 @@ def command(args):
 
         runtime = Runtime.load(Workspace.load(find_workspace(args.workspace)), args.instance)
         with locked(runtime.operation_lock):
-            print(register(runtime))
+            stable = register(runtime)
+            print(stable or "Proxy disabled; run odx proxy start to enable it")
         return 0
     with locked(directory() / "proxy.lock"):
         state = load()
@@ -258,6 +265,7 @@ def command(args):
                 raise OdxError("Proxy port is already configured; keep it stable")
             port = 8080 if args.port is None else args.port
             state = state or {"schema": 1, "port": port, "routes": {}}
+            state["enabled"] = True
             if not 1024 <= state["port"] <= 65535:
                 raise OdxError("Proxy port must be between 1024 and 65535")
             save(state, start=True)
@@ -265,7 +273,10 @@ def command(args):
         elif action == "stop":
             if running():
                 caddy("stop", "--address", f"unix/{directory() / 'admin.sock'}")
-            print("Proxy stopped; routes retained")
+            state = state or {"schema": 1, "port": 8080, "routes": {}}
+            state["enabled"] = False
+            save(state)
+            print("Proxy stopped; automatic startup disabled; routes retained")
         elif action == "remove":
             if not state or args.hostname not in state["routes"]:
                 raise OdxError("No registered proxy route with that exact hostname")
