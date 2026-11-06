@@ -16,6 +16,7 @@ from . import container
 from .errors import OdxError
 from .locking import locked
 from .runtime import write_private
+from .targets import database_lock, development_database
 
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,62}\Z")
 GENERATED = re.compile(r"odx_(restore|update|previous|test)_([a-f0-9]{32})\Z")
@@ -295,7 +296,7 @@ def set_password(env, password, login=None):
     return actual_login
 
 
-def passwd(password, login=None):
+def passwd(password, login=None, database="dev"):
     from .odoo_compat import configure, loadable_module_names
 
     container.require_ready()
@@ -318,7 +319,7 @@ def passwd(password, login=None):
         init_logger=getattr(getattr(odoo, "netsvc", None), "init_logger", None),
     )
     config["db_name"] = []
-    database = "dev"
+    development_database(database)
     try:
         with sql_db.db_connect(database).cursor() as cursor:
             cursor.execute(
@@ -343,12 +344,71 @@ def passwd(password, login=None):
                 raise OdxError("Installed Python modules were not loaded; password change refused")
             changed_login = set_password(env, password, login)
         print(
-            f"Password changed in dev for {changed_login!r}; login, activation and MFA unchanged."
+            f"Password changed in {database} for {changed_login!r}; "
+            "login, activation and MFA unchanged."
         )
     finally:
         odoo.modules.registry.Registry.delete(database)
         sql_db.close_db(database)
     return 0
+
+
+def owned_database(backend, name):
+    development_database(name)
+    with closing(backend.connect()) as connection:
+        row = next((row for row in backend.inventory(connection) if row["name"] == name), None)
+    if row is None or row["protected"]:
+        raise OdxError("An existing, owned, connectable development database is required")
+
+
+def orm_shell(backend, name):
+    """Validate before native shell startup, which otherwise may initialize an empty DB."""
+    import psycopg2
+
+    container.require_ready()
+    owned_database(backend, name)
+    options = backend.options
+    with closing(
+        psycopg2.connect(
+            host=options["db_host"],
+            port=options["db_port"],
+            user=options["db_user"],
+            password=options["db_password"],
+            dbname=name,
+            connect_timeout=10,
+        )
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT name,state,latest_version FROM ir_module_module "
+                "WHERE state IN ('installed','to install','to upgrade','to remove')"
+            )
+            modules = cursor.fetchall()
+            if any(state != "installed" for _, state, _ in modules):
+                raise OdxError("Pending module operations; ORM shell refused")
+            version = next((version for module, _, version in modules if module == "base"), "")
+            if not version.startswith(backend.context["version"] + "."):
+                raise OdxError("Database Odoo version differs from the instance")
+            cursor.execute(
+                "SELECT 1 FROM ir_config_parameter WHERE key='base.partially_updated_database'"
+            )
+            if cursor.fetchone():
+                raise OdxError("Partial module update; ORM shell refused")
+    return container.run_command(
+        [
+            container.PYTHON,
+            container.ODOO,
+            "shell",
+            "--config",
+            container.CONFIG,
+            "--database",
+            name,
+            "--no-http",
+            "--workers=0",
+            "--max-cron-threads=0",
+        ],
+        check=False,
+    ).returncode
 
 
 def execute(args):
@@ -357,9 +417,17 @@ def execute(args):
         if args.command == "passwd":
             if args.login == "":
                 raise OdxError("--login must be a nonempty exact login")
-            with locked(container.STATE / "dev-database.lock"):
-                Backend()  # Validate generated endpoints before loading any registry.
-                return passwd(read_password(stdin=args.password_stdin), args.login)
+            with locked(database_lock(container.STATE, args.database)):
+                backend = Backend()
+                owned_database(backend, args.database)
+                return passwd(
+                    read_password(stdin=args.password_stdin),
+                    args.login,
+                    **({"database": args.database} if args.database != "dev" else {}),
+                )
+        if args.command == "shell":
+            with locked(database_lock(container.STATE, args.database), shared=True):
+                return orm_shell(Backend(), args.database)
         backend = Backend()
         if args.database_command == "drop":
             with locked(container.STATE / "dev-database.lock"):
@@ -383,10 +451,10 @@ def main():
     from .cli import parser
 
     args = parser().parse_args()
-    if args.command not in ("db", "passwd") or (
+    if args.command not in ("db", "passwd", "shell") or (
         args.command == "db" and args.database_command not in ("list", "drop")
     ):
-        raise SystemExit("Only db list/drop and passwd are supported by this worker")
+        raise SystemExit("Only db list/drop, passwd and shell are supported by this worker")
     try:
         return execute(args)
     except OdxError as error:

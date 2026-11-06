@@ -34,6 +34,7 @@ def database(tmp_path, monkeypatch):
         queries=[],
         writes=[],
         fail=None,
+        target="dev",
     )
 
     class Connection:
@@ -69,7 +70,7 @@ def database(tmp_path, monkeypatch):
         def execute(self, query, params=None):
             state.queries.append((self.connection.kwargs["dbname"], query, params))
             if "FROM pg_database" in query:
-                assert params == ["dev"]
+                assert params == [state.target]
                 self.row = state.owned
             elif "to_regclass" in query:
                 self.row = state.tables
@@ -184,6 +185,15 @@ def test_invalid_report_http_port_rejected_before_connecting(database, port):
 
 def test_default_report_port():
     assert reports.internal_url({}) == "http://127.0.0.1:8069"
+
+
+def test_explicit_report_target_uses_same_internal_port_without_changing_dev_config(database):
+    database.target = "octubre"
+    assert reports.prepare(database.config, "octubre") is True
+    assert [c.kwargs["dbname"] for c in database.connections] == ["postgres", "octubre"]
+    assert "db_name=dev" in database.config.read_text()
+    assert database.parameters["report.url"] == "http://127.0.0.1:8077"
+    assert database.parameters["web.base.url"] == "http://client-main.localhost:8080"
 
 
 def test_missing_config_rejected_before_connecting(database):

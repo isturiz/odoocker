@@ -17,12 +17,17 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 - `cli.py`: host-facing commands; keep subprocess arguments as lists.
 - `adapters/opencode.py`: OpenCode-specific connection behavior.
 - `container.py`: in-container Odoo commands; no Docker access required.
-- `reports.py`: native internal report URLs for the managed development database;
+- `targets.py`: explicit development names, per-database leases and finalized-restore
+  catalog. Legacy journals target `dev`; never enroll recovery/test/system databases.
+- `reports.py`: native internal report URLs for the managed development databases;
   preserve browser URLs and isolated test ports.
 - `restore/`: host-scoped maintenance, offline workers and durable restore checkpoints;
   never publish an unverified DB/filestore pair. New restores dispose of their own
   update checkpoints only after successful host finalization, unless `--keep-checkpoints`;
   preserve unfinished/legacy recovery pairs and previous destinations from `--replace`.
+- Keep one native multibase Odoo server per instance. Init/update flags must target
+  one database, never the HTTP server's database list. ORM shells may coexist with
+  normal HTTP but must retain shared environment/database leases.
 - `odoo_compat.py`: inspect native API capabilities, not release-number branches.
   Validated releases are informational; retain backup/workspace version and downgrade guards.
 - OpenCode owns its native worktrees. Do not implement a competing Git manager.

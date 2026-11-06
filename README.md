@@ -525,9 +525,10 @@ survives regeneration and disabling/re-enabling the manager. Existing PostgreSQL
 and OpenCode credentials are not rotated. The generated configuration is read-only
 inside Odoo: manage this secret on the host, not through the web password-change form.
 
-The primary database remains `dev`: `odx run --init/--update`, restores and `passwd`
-retain that target. An expanded HTTP filter permits selecting other matching
-databases in the browser; it does not retarget those CLI operations.
+The default database remains `dev`. Use `--database NAME` to select another target
+for restores, `run --init/--update`, ORM shells and `passwd`. An expanded HTTP filter
+alone does not retarget CLI operations. Successfully finalized named restores are
+also admitted by `odx run` without enabling the web manager.
 
 **Web operations bypass odoocker's maintenance leases, checkpoint protections,
 restore verification and neutralization workflow.** Use the CLI for validated
@@ -592,8 +593,10 @@ PostgreSQL downgrade.** It does not fetch or switch addon branches.
 
 Restore behavior and options:
 
-- Target is the selected instance's `dev`. An existing DB or filestore is rejected;
-  `--replace` explicitly preserves the old pair under a generated recovery name.
+- Target defaults to the selected instance's `dev`; `--database NAME` restores a
+  separate development database and filestore. An existing destination is rejected;
+  `--replace` explicitly preserves only that destination's old pair under a generated
+  recovery name. System databases and the engine's `odx_` namespace are reserved.
 - Missing PostgreSQL roles stop the operation before SQL import. Review the private
   role inventory, then opt into `--create-missing-roles` if appropriate. New roles
   are `NOLOGIN`, non-superuser, without database/role creation, inheritance,
@@ -612,7 +615,7 @@ Restore behavior and options:
   Odoo may also update/install required dependencies according to its native rules.
 - After a successfully finalized restore, its pre-update DB/filestore checkpoint
   is deleted automatically. Use `--keep-checkpoints` to retain that recovery pair
-  explicitly. This does not affect the original ZIP, `dev`, logs, or a previous
+  explicitly. This does not affect the original ZIP, the published database, logs, or a previous
   destination preserved by `--replace`. Failed/incomplete restores retain their
   checkpoints; older operations without this retention policy also keep them on resume.
 - After a successfully finalized restore, the extracted `dump.sql` is deleted
@@ -650,13 +653,82 @@ load. Unknown integration behavior is not automatically neutralized: client addo
 must supply their own native `data/neutralize.sql`, and a hook undoing neutralization
 blocks publication. This is **not anonymization** or complete functional validation.
 
-Only a validated pair is published as `dev`. Copy UUID/secret are regenerated and
+Only a validated pair is published under the selected name. Copy UUID/secret are regenerated and
 the local URL is set after support containers restart. Odoo itself is not started:
 
 ```sh
 odx run
 odx status
 ```
+
+### Several databases in one instance
+
+For occasional comparisons, keep the usual `dev` and restore another backup by name:
+
+```sh
+# Host, with managed work and OpenCode clients stopped:
+odx db restore /path/to/newer-backup.zip --database sandbox_newer
+
+# One Odoo process serves dev and all successfully finalized named restores:
+odx run
+# Another host terminal:
+odx status
+odx code opencode
+```
+
+There is still just one PostgreSQL, one Odoo server and one OpenCode service in the
+instance. Odoo uses its native separate database registries and `filestore/NAME/`
+directories. Every database shares the current Odoo/addon code and Python environment;
+this does not reconstruct historical source code from a backup. Additional copies
+consume database/filestore disk space and registry memory, not a new container stack.
+
+`odx run` discovers named targets only from successfully host-finalized restore journals
+in this instance. It prepares report URLs for initialized, owned targets and adds their
+exact names to the HTTP filter; tests/checkpoints/previous copies are not enrolled.
+Dropped targets are skipped rather than recreated. Keep `.odoocker/` and its journals.
+Existing databases created outside this restore workflow are not automatically enrolled;
+an explicit `odx run --database NAME` can include such an initialized target for that run.
+
+Use the `databases` links from host `odx status`. With Caddy available, each extra
+database has a stable `db-<identity>.localhost` alias pointing to the **same Odoo port**,
+and its link selects the database using Odoo's native `?db=NAME`. Different hosts
+isolate browser cookies, so both copies can stay open in the same browser. Aliases
+are not access-control boundaries or database-pinned hosts: follow the selection links.
+Without Caddy, links use the same direct host/port; use separate browser profiles to
+avoid switching the database in another tab's shared session. The web database manager
+does not need to be enabled.
+
+From the host **or the single OpenCode container**, use the native ORM shell:
+
+```sh
+odx shell                             # dev
+odx shell --database sandbox_newer
+odx shell --database dev < inspect_records.py
+odx shell --database sandbox_newer < inspect_records.py
+```
+
+The shell supplies Odoo's usual `env` and runs without HTTP or cron. It refuses missing,
+protected, wrong-version and pending/partially updated databases. It can coexist with
+normal `odx run`, and both containers share the appropriate filestores. Native shell
+transactions roll back on exit unless the script explicitly calls `env.cr.commit()`;
+this is **not a read-only sandbox**, and addon hooks/external side effects still run.
+Compare results from separate invocations; do not reuse recordsets between databases.
+
+For module maintenance, stop the server first and choose exactly one database:
+
+```sh
+odx run --database sandbox_newer --update my_module --stop-after-init
+odx passwd --database sandbox_newer
+odx run
+```
+
+Omitting `--database` preserves `dev` as the maintenance target. In multibase mode,
+init/update runs offline against only that target before HTTP startup; flags are never
+applied to the whole database list. Only one managed HTTP server can run per instance.
+Normal ORM shells share its database leases; maintenance needs exclusive access.
+Restoring any additional backup still pauses the **whole instance**, including OpenCode,
+using the existing network-isolated restore workflow. Resume retains its original
+destination; `--database` cannot retarget a recovery operation.
 
 ### Database inventory and explicit deletion
 
@@ -708,7 +780,8 @@ odx passwd --login exact-login
 secret-source | odx passwd --password-stdin
 ```
 
-The target database is always this instance's `dev`. By default the account is
+The target database defaults to this instance's `dev`; select another with
+`--database NAME`. By default the account is
 identified by `base.user_admin`, not a hard-coded login or numeric ID. `--login`
 selects an exact account, including inactive accounts without activating them.
 Interactive input is hidden and confirmed; there is no default password and no
@@ -842,7 +915,8 @@ odx logs --test ID --result
 ```
 
 Locks prevent dependency installation while a managed Odoo operation uses the
-environment, and prevent two managed operations from running against `dev`.
+environment. Per-database leases allow ordinary HTTP and ORM shells to coexist,
+while excluding conflicting module/password maintenance.
 They do not coordinate external processes or prevent two agents from editing the
 same file. A forced Docker shutdown/SIGKILL may leave test resources behind;
 there is no automatic garbage collector. Do not use `down` during active operations.
@@ -878,7 +952,7 @@ the configured Odoo/PostgreSQL/OpenCode versions. For checkout testing, prefix e
 command with `uv run --project /path/to/odoocker`. Repeat explicitly for other
 instances as needed.
 
-**Report assets are configured automatically for the managed `dev` database.**
+**Report assets are configured automatically for the served development databases.**
 Before serving HTTP, `odx run` sets Odoo's native database parameter `report.url`
 to `http://127.0.0.1:<http_port>` (normally `8069`), so wkhtmltopdf fetches CSS and
 images from the Odoo process in its own container. It does not use the host's
@@ -902,7 +976,7 @@ Restore finalization sets the same internal `report.url` together with its usual
 local browser URL, before marking the host operation finalized or disposing of
 checkpoints. `setup` still does not create/initialize/change databases; `odx test`
 keeps its own isolated database and dynamically selected HTTP port, without running
-the `dev` parameter preparation. Other development copies and Odoo launches outside
+the development parameter preparation. Unselected/unmanaged copies and Odoo launches outside
 `odx run` are not automatically configured. Custom report/layout failures still
 require their own diagnosis. Adopt the updated **in-container** engine explicitly;
 upgrading only the host CLI does not change an already running container's `odx run`.

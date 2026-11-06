@@ -58,6 +58,52 @@ def test_proxy_starts_and_registers_without_prior_configuration(runtime, isolate
     assert proxy.load()["routes"]["client-main.localhost"]["project"] == runtime.project
 
 
+def test_database_aliases_share_upstream_but_isolate_browser_cookie_hosts(runtime):
+    first = proxy.sync(runtime, service="odoo", database="octubre")
+    second_host = proxy.hostname(runtime, database="noviembre")
+    assert first == f"http://{proxy.hostname(runtime, database='octubre')}:8080"
+    assert second_host not in first
+    routes = proxy.load()["routes"]
+    alias = routes[proxy.hostname(runtime, database="octubre")]
+    assert alias["database"] == "octubre"
+    assert alias["upstream"] == routes["client-main.localhost"]["upstream"]
+    assert proxy.url(runtime, "http://127.0.0.1:49000") == "http://client-main.localhost:8080"
+    assert proxy.url(runtime, "http://127.0.0.1:49000", database="octubre") == first
+
+
+def test_finalized_restore_aliases_are_refreshed_by_normal_lifecycle(runtime):
+    directory = runtime.directory / "restores" / ("a" * 32)
+    directory.mkdir(parents=True)
+    (directory / "result.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": directory.name,
+                "project": runtime.project,
+                "database": "octubre",
+                "status": "completed",
+                "published": True,
+                "host_finalized": True,
+            }
+        )
+    )
+    proxy.sync(runtime)
+    assert proxy.hostname(runtime, database="octubre") in proxy.load()["routes"]
+    document = proxy.document(proxy.load())
+    upstreams = [
+        route["handle"][0]["upstreams"]
+        for route in document["apps"]["http"]["servers"]["odx"]["routes"][:-1]
+    ]
+    assert upstreams[0] == upstreams[1]
+
+
+def test_database_hostnames_are_stable_and_do_not_alias_case_or_underscores(runtime):
+    names = ["a-b", "a_b", "October", "october", "a" * 63]
+    hosts = {proxy.hostname(runtime, database=name) for name in names}
+    assert len(hosts) == len(names)
+    assert all(proxy.HOST.fullmatch(host) for host in hosts)
+
+
 def test_stopped_proxy_restarts_with_existing_port_and_routes(runtime, isolated_proxy):
     cli.main(["proxy", "start", "--port", "8088"])
     proxy.register(replace(runtime, instance="other"))

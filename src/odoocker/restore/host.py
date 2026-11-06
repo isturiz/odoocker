@@ -18,13 +18,16 @@ from ..maintenance import maintenance_process
 from ..reports import internal_url
 from ..runtime import PACKAGE, _literals, bind, compose_env, run_command, write_private
 from ..setup import GUARD
+from ..targets import browser_url, development_database
 from .archive import inventory
 
 PROBE = r"""
-import configparser,json
+import configparser,json,sys
 from pathlib import Path
 import psycopg2
 from odoocker.container import require_ready
+from odoocker.targets import development_database
+target=development_database(sys.argv[1] if len(sys.argv)>1 else 'dev')
 require_ready()
 for process in Path('/proc').glob('[0-9]*/cmdline'):
     try:
@@ -44,11 +47,11 @@ with psycopg2.connect(host=o['db_host'],user=o['db_user'],
                    "AND backend_type='client backend'")
         if cr.fetchone()[0]:
             raise SystemExit('Database clients are active; no services changed')
-        cr.execute("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname='dev')")
+        cr.execute("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=%s)",[target])
         exists=cr.fetchone()[0]
         cr.execute('SHOW server_version_num')
         major=int(cr.fetchone()[0])//10000
-print(json.dumps({'database':exists,'filestore':(Path(o['data_dir'])/'filestore/dev').exists(),'postgres':str(major)}))
+print(json.dumps({'database':exists,'filestore':(Path(o['data_dir'])/'filestore'/target).exists(),'postgres':str(major)}))
 """
 
 FINALIZE = r"""
@@ -56,13 +59,15 @@ import configparser,sys
 from pathlib import Path
 import psycopg2
 from odoocker.locking import locked
+from odoocker.targets import development_database,database_lock
+target=development_database(sys.argv[3] if len(sys.argv)>3 else 'dev')
 c=configparser.ConfigParser(interpolation=None)
 c.read('/etc/odoocker/odoo.conf')
 o=c['options']
 with locked(Path('/var/lib/odoocker/environment.lock'),shared=True), \
-     locked(Path('/var/lib/odoocker/dev-database.lock')):
+      locked(database_lock(Path('/var/lib/odoocker'),target)):
     with psycopg2.connect(host=o['db_host'],port=o['db_port'],user=o['db_user'],
-                         password=o['db_password'],dbname='dev') as db:
+                          password=o['db_password'],dbname=target) as db:
         with db.cursor() as cr:
             for key,value in [('web.base.url',sys.argv[1]),('web.base.url.freeze','True'),
                               ('report.url',sys.argv[2])]:
@@ -189,7 +194,7 @@ def cleanup_sql(runtime, directory, record):
         # Publication succeeded. A housekeeping failure must not imply a bad dev.
         record["sql_cleanup"] = {"status": "pending", "error": type(error).__name__}
         print(
-            "WARNING: dev is restored, but temporary SQL cleanup is pending; "
+            "WARNING: database is restored, but temporary SQL cleanup is pending; "
             "retry with --resume " + record["id"],
             file=sys.stderr,
         )
@@ -228,7 +233,7 @@ def cleanup_checkpoints(runtime, directory, record):
         progress.update(status="pending", error=type(error).__name__)
         record["checkpoint_cleanup"] = progress
         print(
-            "WARNING: dev is restored, but checkpoint cleanup is pending; "
+            "WARNING: database is restored, but checkpoint cleanup is pending; "
             "retry with --resume " + record["id"],
             file=sys.stderr,
         )
@@ -331,6 +336,9 @@ def document(runtime, saved, directory, image, database_image, record):
 
 
 def restore(runtime, args):
+    requested_database = getattr(args, "database", None)
+    if requested_database is not None:
+        development_database(requested_database)
     if bool(args.backup) == bool(args.resume):
         raise OdxError("Provide exactly one ZIP backup or --resume <restore-id>")
     if args.resume and not re.fullmatch(r"[a-f0-9]{32}", args.resume):
@@ -354,6 +362,9 @@ def restore(runtime, args):
                 raise OdxError(
                     "Restore belongs to another instance/configuration; no services changed"
                 )
+            target = development_database(record.get("database", "dev"))
+            if requested_database is not None and requested_database != target:
+                raise OdxError("Resume must retain the original restore database")
             changed = options(args, record["options"])
             if record.get("publication_started") and changed != {
                 "keep_sql": False,
@@ -368,6 +379,7 @@ def restore(runtime, args):
                 print(f"Restore already completed: {directory}")
                 return 0
         else:
+            target = development_database(requested_database or "dev")
             try:
                 source = args.backup.expanduser().resolve(strict=True)
             except OSError as error:
@@ -386,6 +398,7 @@ def restore(runtime, args):
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             record = {
                 "schema": 1,
+                "database": target,
                 "id": restore_id,
                 "project": runtime.project,
                 "configuration": fingerprint,
@@ -472,7 +485,9 @@ def restore(runtime, args):
         record.setdefault("previous_running", running)
         # Existing runtime dependencies are checked without rebuilding or replacing it.
         probe = json.loads(
-            regular("exec", "-T", "odoo", "/opt/venv/bin/python", "-c", PROBE, capture=True).stdout
+            regular(
+                "exec", "-T", "odoo", "/opt/venv/bin/python", "-c", PROBE, target, capture=True
+            ).stdout
         )
         if probe["postgres"] != record["postgres"]:
             raise OdxError("Actual PostgreSQL major differs from the configured instance")
@@ -482,7 +497,7 @@ def restore(runtime, args):
             and not record.get("publication_started")
         ):
             raise OdxError(
-                "dev or its filestore exists; --replace explicitly preserves and replaces it"
+                f"{target} or its filestore exists; --replace explicitly preserves and replaces it"
             )
         images = []
         for service in ("odoo", "db"):
@@ -547,7 +562,9 @@ def restore(runtime, args):
                     raise OdxError("Workspace changed during restore preparation")
                 stage()
                 # Check again under the exclusive Linux lease, before stopping anything.
-                regular("exec", "-T", "odoo", "/opt/venv/bin/python", "-c", PROBE, capture=True)
+                regular(
+                    "exec", "-T", "odoo", "/opt/venv/bin/python", "-c", PROBE, target, capture=True
+                )
                 if "opencode" in running:
                     active_sessions(runtime)
                     regular("stop", "--timeout", "30", "opencode", capture=True)
@@ -583,7 +600,9 @@ def restore(runtime, args):
                 # A failed stop prevents the normal PostgreSQL from starting.
                 scoped("stop", "--timeout", "30", "restore-worker", "restore-db", capture=True)
                 regular("start", "--wait", "--wait-timeout", "120", "db", "odoo", capture=True)
-        url = proxy.sync(runtime, service="odoo") or runtime.url("odoo", 8069)
+        url = proxy.sync(
+            runtime, service="odoo", **({"database": target} if target != "dev" else {})
+        ) or runtime.url("odoo", 8069)
         report_config = configparser.ConfigParser(interpolation=None)
         report_config.read(runtime.directory / "odoo.conf")
         regular(
@@ -595,11 +614,13 @@ def restore(runtime, args):
             FINALIZE,
             url,
             internal_url(report_config["options"]),
+            *([target] if target != "dev" else []),
             capture=True,
         )
         access = {
             "login": record["admin"]["login"],
-            "url": url,
+            "url": browser_url(url, target),
+            "database": target,
             "password": "admin" if record["options"]["reset_admin_password"] else None,
             "password_reset": record["options"]["reset_admin_password"],
         }
@@ -611,6 +632,9 @@ def restore(runtime, args):
         proxy.sync(runtime)
         cleanup_sql(runtime, directory, record)
         cleanup_checkpoints(runtime, directory, record)
-        print(f"Restored dev; {record['verified_attachments']} attachments verified. Run odx run.")
+        print(
+            f"Restored {target}; {record['verified_attachments']} attachments verified. "
+            "Run odx run."
+        )
         print(f"Local access details: {directory / 'access.json'}")
         return 0

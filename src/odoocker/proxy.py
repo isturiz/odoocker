@@ -1,5 +1,6 @@
 """Automatic host Caddy, shared by workspaces without Docker socket access."""
 
+import hashlib
 import http.client
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from .errors import OdxError
 from .locking import locked
 from .runtime import run_command, write_private
+from .targets import development_database, published_databases
 
 HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.localhost\Z")
 UPSTREAM = re.compile(r"127\.0\.0\.1:([0-9]+)\Z")
@@ -67,6 +69,8 @@ def load():
                 or route.get("service", "odoo") not in SERVICES
             ):
                 raise ValueError("Invalid proxy route")
+            if "database" in route:
+                development_database(route["database"])
         return state
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise OdxError(f"Invalid proxy registry: {file}; inspect it before retrying") from error
@@ -154,7 +158,12 @@ def save(state, *, start=False):
     candidate.replace(root / "caddy.json")
 
 
-def hostname(runtime, service="odoo"):
+def hostname(runtime, service="odoo", database=None):
+    if database not in (None, "dev"):
+        development_database(database)
+        # Stable, collision-free even for database names differing only by case or '_'.
+        identity = hashlib.sha256(f"{runtime.project}:{database}".encode()).hexdigest()[:24]
+        return f"db-{identity}.localhost"
     prefix = "opencode-" if service == "opencode" else ""
     host = f"{prefix}{runtime.workspace.name}-{runtime.instance}".replace("_", "-") + ".localhost"
     if not HOST.fullmatch(host):
@@ -162,7 +171,9 @@ def hostname(runtime, service="odoo"):
     return host
 
 
-def register(runtime, *, service=None):
+def register(runtime, *, service=None, database=None):
+    if database is not None:
+        development_database(database)
     with locked(directory() / "proxy.lock"):
         state = load() or {"schema": 1, "port": 8080, "enabled": True, "routes": {}}
         if not state.get("enabled", True):
@@ -179,17 +190,31 @@ def register(runtime, *, service=None):
             raise OdxError("No running Odoo/OpenCode services; run odx up (with --code if needed)")
         routes = {}
         for name in services:
-            host = hostname(runtime, name)
-            previous = state["routes"].get(host)
-            if previous and (
-                previous["project"] != runtime.project or previous.get("service", "odoo") != name
-            ):
-                raise OdxError(f"Proxy hostname already belongs to another instance: {host}")
             upstream = runtime.url(name, SERVICES[name]).removeprefix("http://")
             match = UPSTREAM.fullmatch(upstream)
             if not match or not 1 <= int(match[1]) <= 65535:
                 raise OdxError(f"Proxy requires a {name} port published on 127.0.0.1")
-            routes[host] = {"project": runtime.project, "upstream": upstream, "service": name}
+            targets = [None]
+            if name == "odoo":
+                targets += [
+                    target
+                    for target in published_databases(runtime.directory, runtime.project)
+                    if target != "dev"
+                ]
+                if database not in (None, "dev") and database not in targets:
+                    targets.append(database)
+            for target in targets:
+                host = hostname(runtime, name, target)
+                previous = state["routes"].get(host)
+                if previous and (
+                    previous["project"] != runtime.project
+                    or previous.get("service", "odoo") != name
+                    or previous.get("database") != target
+                ):
+                    raise OdxError(f"Proxy hostname already belongs to another instance: {host}")
+                routes[host] = {"project": runtime.project, "upstream": upstream, "service": name}
+                if target is not None:
+                    routes[host]["database"] = target
         state["routes"] = {
             key: value
             for key, value in state["routes"].items()
@@ -198,7 +223,7 @@ def register(runtime, *, service=None):
         }
         state["routes"].update(routes)
         save(state, start=True)
-        return f"http://{hostname(runtime, services[0])}:{state['port']}"
+        return f"http://{hostname(runtime, services[0], database)}:{state['port']}"
 
 
 def unregister(runtime):
@@ -213,13 +238,15 @@ def unregister(runtime):
             save(state)
 
 
-def sync(runtime, *, remove=False, service=None):
+def sync(runtime, *, remove=False, service=None, database=None):
     """Ensure routes and Caddy; return a usable URL without failing the main operation."""
     try:
         if remove:
             unregister(runtime)
         else:
-            stable = register(runtime, service=service)
+            stable = register(
+                runtime, service=service, **({"database": database} if database is not None else {})
+            )
             if stable:
                 if not running():
                     raise OdxError("Caddy started but its admin API is unavailable")
@@ -234,7 +261,7 @@ def sync(runtime, *, remove=False, service=None):
     return None
 
 
-def url(runtime, direct, service="odoo"):
+def url(runtime, direct, service="odoo", database=None):
     state = load()
     if state:
         for host, route in state["routes"].items():
@@ -242,6 +269,7 @@ def url(runtime, direct, service="odoo"):
                 route["project"] == runtime.project
                 and route["upstream"] == direct.removeprefix("http://")
                 and route.get("service", "odoo") == service
+                and route.get("database") == (database if database != "dev" else None)
             ):
                 return f"http://{host}:{state['port']}"
     return None

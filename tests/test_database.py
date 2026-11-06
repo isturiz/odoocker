@@ -431,6 +431,91 @@ def test_worker_sanitizes_driver_errors_including_passwords(monkeypatch, capsys)
     assert "RuntimeError" in captured.err and "secret" not in captured.err
 
 
+@pytest.mark.parametrize("protected,exists", [(True, True), (False, False)])
+def test_orm_target_requires_existing_owned_connectable_database(backend, protected, exists):
+    backend.rows[0]["protected"] = protected
+    if not exists:
+        backend.rows.clear()
+    with pytest.raises(OdxError, match="existing, owned"):
+        database.owned_database(backend, "dev")
+
+
+@pytest.mark.parametrize("mode", ["ready", "pending", "version", "partial"])
+def test_native_orm_shell_preflight_and_stdin_inheritance(monkeypatch, backend, mode):
+    import sys
+
+    backend.rows[0]["name"] = "octubre"
+    backend.options = {
+        "db_host": "db",
+        "db_port": "5432",
+        "db_user": "odoo",
+        "db_password": "private",
+    }
+    backend.context = {"version": "19.0"}
+    calls = []
+    cursor = SimpleNamespace(
+        execute=lambda *args: None,
+        fetchall=lambda: [
+            (
+                "base",
+                "to upgrade" if mode == "pending" else "installed",
+                "18.0.1" if mode == "version" else "19.0.1",
+            )
+        ],
+        fetchone=lambda: (1,) if mode == "partial" else None,
+    )
+
+    def connect(**kwargs):
+        assert kwargs["dbname"] == "octubre"
+        return SimpleNamespace(cursor=lambda: nullcontext(cursor), close=lambda: None)
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
+    monkeypatch.setattr(container, "require_ready", lambda: None)
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kwargs: calls.append((args, kwargs)) or SimpleNamespace(returncode=23),
+    )
+    if mode == "ready":
+        assert database.orm_shell(backend, "octubre") == 23
+        command, options = calls[0]
+        assert command[:3] == [container.PYTHON, container.ODOO, "shell"]
+        assert command[command.index("--database") + 1] == "octubre"
+        assert "--no-http" in command and "--max-cron-threads=0" in command
+        assert options == {"check": False}  # stdin is not captured or replaced.
+    else:
+        with pytest.raises(OdxError, match="Pending|version differs|Partial"):
+            database.orm_shell(backend, "octubre")
+        assert not calls
+
+
+def test_named_password_change_passes_exact_target_and_uses_its_lease(monkeypatch, backend):
+    from odoocker.targets import database_lock
+
+    backend.rows[0]["name"] = "octubre"
+    monkeypatch.setattr(database, "Backend", lambda: backend)
+    monkeypatch.setattr(database, "read_password", lambda **kwargs: "secret")
+
+    def passwd(password, login, **kwargs):
+        assert kwargs == {"database": "octubre"}
+        with (
+            pytest.raises(OdxError, match="Resource busy"),
+            locked(database_lock(container.STATE, "octubre")),
+        ):
+            pytest.fail("Named password mutation needs its own lease")
+        with locked(database_lock(container.STATE, "dev")):
+            pass
+        return 0
+
+    monkeypatch.setattr(database, "passwd", passwd)
+    assert (
+        database.execute(
+            cli.parser().parse_args(["passwd", "--database", "octubre", "--password-stdin"])
+        )
+        == 0
+    )
+
+
 def test_inventory_classifies_protection_without_loading_odoo():
     backend = object.__new__(database.Backend)
     backend.options = {"db_template": "custom_template"}

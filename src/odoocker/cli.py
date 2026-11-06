@@ -24,6 +24,7 @@ from .errors import OdxError
 from .locking import locked
 from .repositories import fetch_repositories
 from .runtime import Runtime, run_command, write_private
+from .targets import browser_url, published_databases
 
 
 def parser():
@@ -86,11 +87,14 @@ def parser():
         "deps", help="Install Linux Odoo/addon requirements under an exclusive lock"
     )
     run = commands.add_parser(
-        "run", help="Run Odoo in the foreground on the instance's dev database"
+        "run", help="Serve development databases; init/update target dev unless selected"
     )
     run.add_argument("--init", dest="install")
     run.add_argument("--update")
     run.add_argument("--stop-after-init", action="store_true")
+    run.add_argument("--database", default="dev", help="Target for init/update (default: dev)")
+    orm = commands.add_parser("shell", help="Native Odoo ORM shell; scripts may be read from stdin")
+    orm.add_argument("--database", default="dev", help="Exact development database (default: dev)")
     tests = commands.add_parser(
         "test", help="Run tests on a fresh isolated database and data directory"
     )
@@ -110,9 +114,12 @@ def parser():
         "--yes", action="store_true", help="Explicitly skip interactive confirmation"
     )
     restore = databases.add_parser(
-        "restore", help="Restore a trusted Odoo SQL ZIP into dev, with neutralization"
+        "restore", help="Restore a trusted Odoo SQL ZIP, with neutralization (default: dev)"
     )
     restore.add_argument("backup", type=Path, nargs="?")
+    restore.add_argument(
+        "--database", help="Restore destination (default: dev; retained on resume)"
+    )
     restore.add_argument("--resume", metavar="ID", help="Continue a retained restore operation")
     restore.add_argument(
         "--keep-sql",
@@ -144,9 +151,12 @@ def parser():
     restore.add_argument(
         "--replace",
         action="store_true",
-        help="Explicitly replace dev, retaining the previous database and filestore",
+        help="Explicitly replace the selected destination, retaining its previous DB/filestore",
     )
-    passwd = commands.add_parser("passwd", help="Change an Odoo user's password in dev")
+    passwd = commands.add_parser("passwd", help="Change an Odoo user's password (default: dev)")
+    passwd.add_argument(
+        "--database", default="dev", help="Exact development database (default: dev)"
+    )
     passwd.add_argument(
         "--login", help="Exact login; defaults to base.user_admin, not a numeric ID"
     )
@@ -214,6 +224,9 @@ def init_workspace(args):
             "- `odx db list`: inspect databases; `db drop NAME --dry-run`: preview deletion.\n"
             "- `db drop NAME --yes` deletes that DB and filestore; stop managed work first.\n"
             "- `odx passwd`: change a dev user's password; never pass passwords as arguments.\n"
+            "- `odx shell --database NAME`: native ORM shell; stdin scripts supported.\n"
+            "- `odx run` serves finalized named restores too; `--database` selects init/update.\n"
+            "- Host-only `odx db restore ZIP --database NAME` adds another development copy.\n"
             "- `odx run` uses the development DB; do not use it for tests.\n"
             "- Worktrees isolate files, not databases or external addon checkouts.\n"
             "- Do not change dependencies while another agent is using the environment.\n"
@@ -297,7 +310,10 @@ def in_container(args):
             install=args.install,
             update=args.update,
             stop=args.stop_after_init,
+            database=args.database,
         )
+    if args.command == "shell":
+        return container.odoo_shell(args.database)
     if args.command == "test":
         return container.run_tests(args.module, tags=args.tags, keep=args.keep)
     if args.command == "passwd" or (
@@ -310,7 +326,7 @@ def in_container(args):
         return container.serve_opencode()
     raise OdxError(
         f"{args.command} is a host command; agents can use "
-        "status, deps, run, test, db list/drop, passwd"
+        "status, deps, run, shell, test, db list/drop, passwd"
     )
 
 
@@ -344,6 +360,11 @@ def _status(runtime, as_json=False):
     if "odoo_url" in info or "opencode_url" in info:
         from . import proxy
 
+        if "odoo_url" in info:
+            info["databases"] = {
+                name: browser_url(info["odoo_url"], name)
+                for name in published_databases(runtime.directory, runtime.project)
+            }
         try:
             for service in ("odoo", "opencode"):
                 if f"{service}_url" in info:
@@ -351,6 +372,14 @@ def _status(runtime, as_json=False):
                     if stable:
                         info[f"{service}_proxy_url"] = stable
                         info["proxy_running"] = proxy.running()
+            if "databases" in info:
+                info["databases"] = {
+                    name: browser_url(
+                        proxy.url(runtime, info["odoo_url"], database=name) or info["odoo_url"],
+                        name,
+                    )
+                    for name in info["databases"]
+                }
         except OdxError as error:
             print(f"odx: {error}", file=sys.stderr)
     if as_json:
@@ -458,7 +487,9 @@ def host(args):
         return runtime.compose("exec", "-T", "odoo", "odx", "deps", check=False).returncode
     if args.command == "run":
         from . import proxy
+        from .targets import development_database
 
+        development_database(args.database)
         with locked(runtime.operation_lock):
             proxy.sync(runtime)
         command = ["exec"]
@@ -471,7 +502,23 @@ def host(args):
             command.extend(["--update", args.update])
         if args.stop_after_init:
             command.append("--stop-after-init")
+        if args.database != "dev":
+            command.extend(["--database", args.database])
         return runtime.compose(*command, check=False).returncode
+    if args.command == "shell":
+        from .targets import development_database
+
+        development_database(args.database)
+        return runtime.compose(
+            "exec",
+            *([] if sys.stdin.isatty() else ["-T"]),
+            "odoo",
+            "odx",
+            "shell",
+            "--database",
+            args.database,
+            check=False,
+        ).returncode
     if args.command == "test":
         # Every host-invoked test gets its own network namespace; no published test ports.
         command = ["run", "--rm", "--no-deps", "-T", "odoo", "odx", "test", "--module", args.module]

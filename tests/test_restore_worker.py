@@ -242,6 +242,63 @@ def test_default_pipeline_neutralizes_before_hooks_and_does_not_reset_password(p
     assert json.loads((pipeline.directory / "access.json").read_text())["password"] is None
 
 
+def test_named_restore_preserves_dev_and_publishes_its_own_filestore(pipeline):
+    pipeline.record["database"] = "octubre"
+    pipeline.backend.create("dev")
+    (pipeline.backend.root / "dev").mkdir()
+    (pipeline.backend.root / "dev/untouched").write_text("development")
+    before = pipeline.backend.identity("dev")
+    pipeline.run()
+    assert pipeline.backend.identity("dev") == before
+    assert (pipeline.backend.root / "dev/untouched").read_text() == "development"
+    assert (pipeline.backend.root / "octubre/fixture").read_text() == "retained content"
+    assert "octubre" in pipeline.backend.databases
+    assert not any(event[0] == "ddl" and "dev" in event[2:] for event in pipeline.backend.events)
+
+
+def test_named_replace_retains_only_the_selected_previous_pair(pipeline):
+    pipeline.record.update(database="noviembre")
+    pipeline.record["options"]["replace"] = True
+    for name in ["dev", "noviembre"]:
+        pipeline.backend.create(name)
+        (pipeline.backend.root / name).mkdir()
+    before = {name: pipeline.backend.identity(name) for name in ["dev", "noviembre"]}
+    pipeline.run()
+    assert pipeline.backend.identity("dev") == before["dev"]
+    assert pipeline.backend.identity(pipeline.record["previous"]) == before["noviembre"]
+    assert pipeline.backend.identity("noviembre") != before["noviembre"]
+
+
+def test_named_restore_requires_replace_for_its_destination_not_dev(pipeline):
+    pipeline.record["database"] = "octubre"
+    pipeline.backend.create("octubre")
+    with pytest.raises(OdxError, match="octubre.*replace"):
+        pipeline.run()
+    assert not any(event[0] == "import" for event in pipeline.backend.events)
+
+
+def test_named_publication_resume_reconciles_pair_identity_without_touching_dev(pipeline):
+    pipeline.record["database"] = "octubre"
+    pipeline.backend.create("dev")
+    before = pipeline.backend.identity("dev")
+    original = pipeline._move_database
+    interrupted = False
+
+    def move(source, target, expected):
+        nonlocal interrupted
+        original(source, target, expected)
+        if target == "octubre" and not interrupted:
+            interrupted = True
+            raise OdxError("disconnected after rename")
+
+    pipeline._move_database = move
+    with pytest.raises(OdxError, match="disconnected"):
+        pipeline.run()
+    pipeline.run()
+    assert pipeline.record["published"]
+    assert pipeline.backend.identity("dev") == before
+
+
 def test_default_role_policy_stops_before_import_and_can_resume(pipeline):
     (pipeline.backend.scratch / "extracted/dump.sql").write_text(
         "GRANT USAGE ON SCHEMA public TO reader;"

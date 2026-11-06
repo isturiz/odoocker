@@ -93,7 +93,10 @@ class Pipeline:
 
     def publish(self):
         record, backend = self.record, self.backend
-        target, previous, source = "dev", record["previous"], record["working_database"]
+        from ..targets import development_database
+
+        target = development_database(record.get("database", "dev"))
+        previous, source = record["previous"], record["working_database"]
         if not record.get("publication_started"):
             backend.idle([source, target, previous])
             if backend.identity(target) != record["target_before"]:
@@ -128,20 +131,24 @@ class Pipeline:
 
     def run(self):
         record, backend = self.record, self.backend
+        from ..targets import development_database
+
+        target_name = development_database(record.get("database", "dev"))
         if record.get("publication_started"):
             self.publish()
             return
         options = record["options"]
         name = record["temporary"]
         if "target_before" not in record:
-            target = backend.identity("dev")
+            target = backend.identity(target_name)
             if any(target.values()) and not options["replace"]:
                 raise OdxError(
-                    "dev or its filestore already exists; use --replace to retain and replace"
+                    f"{target_name} or its filestore already exists; "
+                    "use --replace to retain and replace"
                 )
             record["target_before"] = target
             self.save("preparing")
-        elif backend.identity("dev") != record["target_before"]:
+        elif backend.identity(target_name) != record["target_before"]:
             raise OdxError("Destination identity changed since this operation began")
         extracted = backend.scratch / "extracted"
         if not record.get("archive_extracted") and extracted.exists():

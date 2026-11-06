@@ -80,6 +80,64 @@ def test_only_explicit_opencode_assistant_is_accepted():
     assert args.args == ["--", "--model", "example/model"]
 
 
+def test_database_selection_defaults_and_explicit_restore_resume():
+    assert cli.parser().parse_args(["run"]).database == "dev"
+    assert cli.parser().parse_args(["shell"]).database == "dev"
+    assert cli.parser().parse_args(["passwd"]).database == "dev"
+    assert cli.parser().parse_args(["db", "restore", "backup.zip"]).database is None
+    assert cli.parser().parse_args(["db", "restore", "--resume", "a" * 32]).database is None
+
+
+def test_host_named_run_forwards_target_with_explicit_compose(host_runtime, docker_calls):
+    assert (
+        cli.main(
+            host_args(
+                host_runtime,
+                "run",
+                "--database",
+                "octubre",
+                "--update",
+                "base",
+                "--stop-after-init",
+            )
+        )
+        == 7
+    )
+    args, _ = docker_calls[-1]
+    assert args[-10:] == [
+        "exec",
+        "-T",
+        "odoo",
+        "odx",
+        "run",
+        "--update",
+        "base",
+        "--stop-after-init",
+        "--database",
+        "octubre",
+    ]
+
+
+def test_host_orm_shell_uses_existing_linux_service_and_preserves_exit_code(
+    host_runtime,
+    docker_calls,
+):
+    assert cli.main(host_args(host_runtime, "shell", "--database", "octubre")) == 7
+    assert_scoped_call(
+        host_runtime,
+        docker_calls[-1],
+        ["exec", "-T", "odoo", "odx", "shell", "--database", "octubre"],
+    )
+
+
+def test_container_orm_shell_dispatch_needs_no_docker(monkeypatch):
+    calls = []
+    monkeypatch.setenv("ODOOCKER_CONTAINER", "1")
+    monkeypatch.setattr(container_module, "odoo_shell", lambda name: calls.append(name) or 19)
+    assert cli.main(["shell", "--database", "octubre"]) == 19
+    assert calls == ["octubre"]
+
+
 @pytest.mark.parametrize("action", ["up", "down", "setup", "run"])
 def test_cli_refreshes_proxy_after_managed_lifecycle(host_runtime, monkeypatch, action):
     from odoocker import proxy, setup
@@ -105,6 +163,51 @@ def test_status_does_not_start_or_register_proxy(host_runtime, monkeypatch):
     monkeypatch.setattr(proxy, "sync", forbidden)
     monkeypatch.setattr(Runtime, "compose", lambda *a, **kw: SimpleNamespace(stdout="[]"))
     assert cli.main(host_args(host_runtime, "status")) == 0
+
+
+def test_status_lists_named_browser_links_and_falls_back_if_proxy_registry_is_invalid(
+    host_runtime,
+    monkeypatch,
+    capsys,
+):
+    from odoocker import proxy
+
+    directory = host_runtime.directory / "restores" / ("a" * 32)
+    directory.mkdir(parents=True)
+    (directory / "result.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": directory.name,
+                "project": host_runtime.project,
+                "database": "octubre",
+                "status": "completed",
+                "published": True,
+                "host_finalized": True,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        Runtime,
+        "compose",
+        lambda *a, **kw: SimpleNamespace(
+            stdout=json.dumps([{"Service": "odoo", "State": "running"}])
+        ),
+    )
+    monkeypatch.setattr(Runtime, "url", lambda *args: "http://127.0.0.1:49000")
+
+    def invalid(*args, **kwargs):
+        raise OdxError("Invalid proxy registry")
+
+    monkeypatch.setattr(proxy, "url", invalid)
+    assert cli.main(host_args(host_runtime, "status", "--json")) == 0
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert output["databases"] == {
+        "dev": "http://127.0.0.1:49000",
+        "octubre": "http://127.0.0.1:49000/web?db=octubre",
+    }
+    assert "Invalid proxy registry" in captured.err
 
 
 @pytest.mark.parametrize("argv", [["code"], ["code", "claude"], ["code", "codex"], ["opencode"]])
@@ -292,7 +395,7 @@ def test_database_switch_requires_stopped_services(host_runtime, monkeypatch, ca
             ["run", "--init", "sale", "--update", "base", "--stop-after-init"],
             "run_odoo",
             (),
-            {"install": "sale", "update": "base", "stop": True},
+            {"install": "sale", "update": "base", "stop": True, "database": "dev"},
         ),
         (
             ["test", "--module", "sale", "--tags", "/sale", "--keep"],

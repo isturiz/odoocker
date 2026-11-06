@@ -33,6 +33,7 @@ def isolated_container(tmp_path, monkeypatch):
     monkeypatch.setattr(container, "STATE", state)
     monkeypatch.setattr(container, "PYTHON", str(python))
     monkeypatch.setattr(container, "CONFIG", str(config))
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev"])
     monkeypatch.setattr(container, "requirements", lambda: [requirement])
 
     def forbidden(*args, **kwargs):
@@ -291,6 +292,135 @@ def test_run_odoo_checks_readiness_holds_locks_and_returns_code(ready, monkeypat
         locked(container.STATE / "dev-database.lock"),
     ):
         pass
+
+
+def test_multibase_server_prepares_both_and_keeps_recovery_out(ready, monkeypatch):
+    from odoocker.targets import database_lock
+
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev", "octubre"])
+    prepared, calls = [], []
+
+    def prepare(database="dev"):
+        prepared.append(database)
+        with (
+            pytest.raises(OdxError, match="Resource busy"),
+            locked(database_lock(container.STATE, database)),
+        ):
+            pytest.fail("Every served database needs its lease")
+        # ORM readers can coexist with the HTTP server.
+        with locked(database_lock(container.STATE, database), shared=True):
+            pass
+        return True
+
+    monkeypatch.setattr(container, "prepare_reports", prepare)
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo() == 0
+    assert set(prepared) == {"dev", "octubre"}
+    command = calls[0]
+    assert command[command.index("--database") + 1] == "dev,octubre"
+    filter_ = command[command.index("--db-filter") + 1]
+    import re
+
+    assert re.match(filter_, "dev") and re.match(filter_, "octubre")
+    assert not re.match(filter_, "odx_previous_" + "a" * 32)
+    assert not re.match(filter_, "octubre_extra")
+    assert "--init" not in command and "--update" not in command
+
+
+def test_multibase_updates_only_selected_database_before_serving(ready, monkeypatch):
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev", "octubre"])
+    monkeypatch.setattr(container, "prepare_reports", lambda database="dev": True)
+    calls = []
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo(database="octubre", update="base") == 0
+    offline, server = calls
+    assert offline[offline.index("--database") + 1] == "octubre"
+    assert offline[-2:] == ["--stop-after-init", "--no-http"]
+    assert server[server.index("--database") + 1] == "dev,octubre"
+    assert "--update" not in server
+
+
+def test_multibase_update_of_default_never_updates_the_whole_list(ready, monkeypatch):
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev", "octubre"])
+    monkeypatch.setattr(container, "prepare_reports", lambda database="dev": True)
+    calls = []
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo(update="base") == 0
+    assert "--database" not in calls[0]  # Generated base config remains dev-only.
+    assert calls[0][-2:] == ["--stop-after-init", "--no-http"]
+    assert "--update" not in calls[1]
+
+
+def test_multibase_does_not_recreate_dropped_targets_or_require_dev(ready, monkeypatch):
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev", "dropped", "octubre"])
+    monkeypatch.setattr(container, "prepare_reports", lambda database="dev": database == "octubre")
+    calls = []
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo() == 0
+    assert calls[0][calls[0].index("--database") + 1] == "octubre"
+
+
+def test_stop_after_init_never_serves_or_updates_other_databases(ready, monkeypatch):
+    monkeypatch.setattr(container, "container_databases", lambda: ["dev", "octubre"])
+    monkeypatch.setattr(container, "prepare_reports", lambda database="dev": True)
+    calls = []
+    monkeypatch.setattr(
+        container,
+        "run_command",
+        lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0),
+    )
+    assert container.run_odoo(database="octubre", update="base", stop=True) == 0
+    assert len(calls) == 1 and "dev,octubre" not in calls[0]
+
+
+def test_orm_shell_uses_shared_leases_and_linux_worker(ready, monkeypatch):
+    from odoocker.targets import database_lock
+
+    def run(command, **kwargs):
+        for path in [
+            container.STATE / "environment.lock",
+            database_lock(container.STATE, "octubre"),
+        ]:
+            with pytest.raises(OdxError, match="Resource busy"), locked(path):
+                pytest.fail("ORM shell must protect against maintenance")
+            with locked(path, shared=True):
+                pass
+        assert command == [
+            container.PYTHON,
+            "-m",
+            "odoocker.database",
+            "shell",
+            "--database",
+            "octubre",
+        ]
+        return SimpleNamespace(returncode=7)
+
+    monkeypatch.setattr(container, "run_command", run)
+    assert container.odoo_shell("octubre") == 7
+
+
+@pytest.mark.parametrize("database", ["postgres", "odx_test_x", "a,b"])
+def test_server_and_shell_reject_reserved_targets_before_starting(ready, database):
+    with pytest.raises(OdxError, match="development database"):
+        container.run_odoo(database=database)
+    with pytest.raises(OdxError, match="development database"):
+        container.odoo_shell(database)
 
 
 def test_run_odoo_requires_dependencies(isolated_container):

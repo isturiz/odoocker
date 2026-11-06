@@ -1,7 +1,7 @@
-"""Native development report URL preparation, without loading an Odoo registry.
+"""Native report URLs for an explicitly selected development database, without a registry.
 
-The run controller holds the environment/database leases throughout this worker.
-Only the instance's initialized, owned ``dev`` database may be changed.
+The run controller holds environment/database leases throughout this worker. The
+generated dev-only base configuration anchors the endpoints for every target.
 """
 
 import argparse
@@ -11,6 +11,7 @@ import sys
 from contextlib import closing
 
 from .errors import OdxError
+from .targets import development_database
 
 
 def internal_url(options):
@@ -23,9 +24,10 @@ def internal_url(options):
     return f"http://127.0.0.1:{port}"
 
 
-def prepare(config_path):
+def prepare(config_path, database="dev"):
     import psycopg2
 
+    development_database(database)
     config = configparser.ConfigParser(interpolation=None)
     if not config.read(config_path) or "options" not in config:
         raise OdxError("Missing generated Odoo configuration for report assets")
@@ -53,14 +55,14 @@ def prepare(config_path):
             cursor.execute(
                 "SELECT datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user) "
                 "AND NOT datistemplate AND datallowconn FROM pg_database WHERE datname=%s",
-                ["dev"],
+                [database],
             )
-            database = cursor.fetchone()
-            if database is None:
+            identity = cursor.fetchone()
+            if identity is None:
                 return False
-            if not database[0]:
-                raise OdxError("Report preparation requires an owned, connectable dev database")
-    with closing(psycopg2.connect(**credentials, dbname="dev")) as connection:
+            if not identity[0]:
+                raise OdxError("Report preparation requires an owned, connectable database")
+    with closing(psycopg2.connect(**credentials, dbname=database)) as connection:
         with connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT to_regclass('public.ir_config_parameter'), "
@@ -90,9 +92,10 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
+    parser.add_argument("--database", default="dev")
     args = parser.parse_args()
     try:
-        initialized = prepare(args.config)
+        initialized = prepare(args.config, args.database)
     except (OdxError, psycopg2.Error, OSError, KeyError, configparser.Error) as error:
         print(f"Cannot prepare development report assets: {error}", file=sys.stderr)
         return 1

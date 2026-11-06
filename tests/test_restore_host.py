@@ -179,6 +179,54 @@ def test_cli_restore_flags_and_host_only_dispatch(monkeypatch):
     assert cli.main(["db", "restore", "backup.zip"]) == 1
 
 
+def test_named_restore_probes_finalizes_and_records_the_selected_destination(
+    runtime,
+    backup,
+    processes,
+):
+    calls, _ = processes
+    assert host.restore(runtime, args(backup, database="octubre")) == 0
+    record = json.loads(next((runtime.directory / "restores").glob("*/result.json")).read_text())
+    assert record["database"] == "octubre" and record["host_finalized"]
+    probes = [call for call in calls if host.PROBE in call]
+    assert len(probes) == 2 and all(call[-1] == "octubre" for call in probes)
+    finalize = next(call for call in calls if host.FINALIZE in call)
+    assert finalize[-1] == "octubre"
+    access = json.loads(next((runtime.directory / "restores").glob("*/access.json")).read_text())
+    assert access["database"] == "octubre"
+    assert access["url"].endswith("/web?db=octubre")
+
+
+def test_named_resume_keeps_original_target_and_rejects_retargeting(runtime, backup, processes):
+    calls, state = processes
+    state.failed = True
+    with pytest.raises(OdxError):
+        host.restore(runtime, args(backup, database="octubre"))
+    record = json.loads(next((runtime.directory / "restores").glob("*/result.json")).read_text())
+    calls.clear()
+    with pytest.raises(OdxError, match="original restore database"):
+        host.restore(runtime, args(resume=record["id"], database="noviembre"))
+    assert not calls
+    state.failed = False
+    assert host.restore(runtime, args(resume=record["id"])) == 0
+    assert next(call for call in calls if host.FINALIZE in call)[-1] == "octubre"
+
+
+@pytest.mark.parametrize(
+    "database", ["postgres", "template0", "odx_previous_" + "a" * 32, "dev,octubre", "../dev"]
+)
+def test_restore_rejects_reserved_or_bulk_targets_without_processes(
+    runtime,
+    backup,
+    processes,
+    database,
+):
+    calls, _ = processes
+    with pytest.raises(OdxError, match="development database name"):
+        host.restore(runtime, args(backup, database=database))
+    assert not calls
+
+
 def test_cli_update_modes_are_exclusive():
     with pytest.raises(SystemExit):
         cli.parser().parse_args(
@@ -256,12 +304,16 @@ def test_restore_automatically_registers_and_uses_only_usable_browser_urls(
 
 
 @pytest.mark.parametrize("fail", [False, True])
+@pytest.mark.parametrize("target", ["dev", "octubre"])
 def test_finalize_script_sets_native_parameters_transactionally_under_leases(
-    tmp_path, monkeypatch, fail
+    tmp_path, monkeypatch, fail, target
 ):
     import configparser
 
     import odoocker.locking
+    from odoocker.targets import database_lock
+
+    database_lease = database_lock(tmp_path, target).name
 
     original = {
         "web.base.url": "https://production.invalid",
@@ -290,7 +342,7 @@ def test_finalize_script_sets_native_parameters_transactionally_under_leases(
             return self
 
         def execute(self, query, values):
-            for name in ("environment.lock", "dev-database.lock"):
+            for name in ("environment.lock", database_lease):
                 with pytest.raises(OdxError, match="Resource busy"), locked(tmp_path / name):
                     pytest.fail("Finalization must hold native leases")
             assert "WHERE ir_config_parameter.value IS DISTINCT FROM EXCLUDED.value" in query
@@ -299,7 +351,7 @@ def test_finalize_script_sets_native_parameters_transactionally_under_leases(
                 raise OdxError("injected finalization failure")
 
     def connect(**kwargs):
-        assert kwargs["dbname"] == "dev"
+        assert kwargs["dbname"] == target
         assert kwargs["port"] == "5432"
         return Database()
 
@@ -313,7 +365,14 @@ def test_finalize_script_sets_native_parameters_transactionally_under_leases(
     monkeypatch.setattr(odoocker.locking, "locked", lease)
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
     monkeypatch.setattr(
-        sys, "argv", ["finalize", "http://client-main.localhost:8080", "http://127.0.0.1:8069"]
+        sys,
+        "argv",
+        [
+            "finalize",
+            "http://client-main.localhost:8080",
+            "http://127.0.0.1:8069",
+            *([target] if target != "dev" else []),
+        ],
     )
     if fail:
         with pytest.raises(OdxError, match="injected finalization failure"):
@@ -326,8 +385,8 @@ def test_finalize_script_sets_native_parameters_transactionally_under_leases(
             "web.base.url.freeze": "True",
             "report.url": "http://127.0.0.1:8069",
         }
-    assert events == ["environment.lock", "dev-database.lock"]
-    with locked(tmp_path / "environment.lock"), locked(tmp_path / "dev-database.lock"):
+    assert events == ["environment.lock", database_lease]
+    with locked(tmp_path / "environment.lock"), locked(tmp_path / database_lease):
         pass
 
 

@@ -9,13 +9,14 @@ import signal
 import socket
 import subprocess
 import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 from .errors import OdxError
 from .locking import locked
 from .odoo_compat import check_python_minimum
 from .runtime import run_command, write_private
+from .targets import container_databases, database_lock, development_database
 
 STATE = Path("/var/lib/odoocker")
 PYTHON = "/opt/venv/bin/python"
@@ -111,36 +112,79 @@ def module_names(value):
     return value
 
 
-def run_odoo(*, install=None, update=None, stop=False):
-    with locked(STATE / "environment.lock", shared=True), locked(STATE / "dev-database.lock"):
+def run_odoo(*, install=None, update=None, stop=False, database="dev"):
+    development_database(database)
+    if install:
+        module_names(install)
+    if update:
+        module_names(update)
+    with ExitStack() as leases:
+        leases.enter_context(locked(STATE / "environment.lock", shared=True))
         require_ready()
-        args = [PYTHON, ODOO, "--config", CONFIG]
+        names = [database] if stop else list(dict.fromkeys([*container_databases(), database]))
+        if not stop:
+            leases.enter_context(locked(STATE / "odoo-server.lock"))
+        for name in sorted(names):
+            leases.enter_context(
+                locked(database_lock(STATE, name), shared=not (install or update or stop))
+            )
+        base = [PYTHON, ODOO, "--config", CONFIG]
+        selected = [] if database == "dev" else ["--database", database]
+        args = [*base, *selected]
         if install:
-            args.extend(["--init", module_names(install)])
+            args.extend(["--init", install])
         if update:
-            args.extend(["--update", module_names(update)])
-        initialized = prepare_reports()
+            args.extend(["--update", update])
+        initialized = prepare_reports() if database == "dev" else prepare_reports(database)
+        if database != "dev" and not initialized and not install:
+            raise OdxError(f"{database} is not initialized; restore it or use --init base")
         if stop:
             code = run_command([*args, "--stop-after-init", "--no-http"], check=False).returncode
             if code == 0:
-                require_reports()
+                require_reports() if database == "dev" else require_reports(database)
             return code
-        if not initialized:
-            if not install:
+        multibase = len(names) > 1
+        if not initialized or (multibase and (install or update)):
+            if not install and not initialized and not multibase:
                 raise OdxError(
-                    "Initialize dev with odx run --init base --stop-after-init, or restore a backup"
+                    f"Initialize {database} with odx run --init base --stop-after-init, "
+                    "or restore a backup"
                 )
-            code = run_command([*args, "--stop-after-init", "--no-http"], check=False).returncode
-            if code:
-                return code
-            require_reports()
-            # Initialization/update flags were consumed by the successful offline phase.
-            args = [PYTHON, ODOO, "--config", CONFIG]
+            if install or update:
+                code = run_command(
+                    [*args, "--stop-after-init", "--no-http"], check=False
+                ).returncode
+                if code:
+                    return code
+                require_reports() if database == "dev" else require_reports(database)
+                args = base
+        if multibase:
+            active = [name for name in names if prepare_reports(name)]
+            if not active:
+                raise OdxError("No initialized development databases; restore or initialize one")
+            # Never pass init/update against a list: Odoo would apply it to every DB.
+            args = [*base, "--database", ",".join(active)]
+            import configparser
+
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(CONFIG)
+            original = config["options"].get("dbfilter", "^dev$")
+            extra = "|".join(re.escape(name) for name in active if name != "dev")
+            # Preserve explicitly configured web-manager filters; add only published targets.
+            filter_ = (
+                f"(?:{original})|^(?:{extra})$"
+                if original
+                else f"^(?:{'|'.join(map(re.escape, active))})$"
+            )
+            args.extend(["--db-filter", filter_])
         return run_command([*args, "--dev=all"], check=False).returncode
 
 
-def prepare_reports():
-    result = run_command([PYTHON, "-m", "odoocker.reports", "--config", CONFIG], capture=True)
+def prepare_reports(database="dev"):
+    arguments = [] if database == "dev" else ["--database", development_database(database)]
+    result = run_command(
+        [PYTHON, "-m", "odoocker.reports", "--config", CONFIG, *arguments], capture=True
+    )
     try:
         state = json.loads(result.stdout)
         if type(state["initialized"]) is not bool:
@@ -150,14 +194,28 @@ def prepare_reports():
         raise OdxError("Invalid development report preparation result") from error
 
 
-def require_reports():
-    if not prepare_reports():
-        raise OdxError("dev is not initialized; cannot prepare development report assets")
+def require_reports(database="dev"):
+    if not (prepare_reports() if database == "dev" else prepare_reports(database)):
+        raise OdxError(f"{database} is not initialized; cannot prepare development report assets")
+
+
+def odoo_shell(database="dev"):
+    development_database(database)
+    with (
+        locked(STATE / "environment.lock", shared=True),
+        locked(database_lock(STATE, database), shared=True),
+    ):
+        require_ready()
+        return run_command(
+            [PYTHON, "-m", "odoocker.database", "shell", "--database", database], check=False
+        ).returncode
 
 
 def database_arguments(args):
     if args.command == "passwd":
         result = ["passwd"]
+        if args.database != "dev":
+            result.extend(["--database", development_database(args.database)])
         if args.login is not None:
             result.extend(["--login", args.login])
         if args.password_stdin:
