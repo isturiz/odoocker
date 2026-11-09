@@ -33,6 +33,10 @@ def verify(runtime):
     match = re.fullmatch(r"(?:opencode\s+)?v?(2\.\d+\.\d+(?:-[\w.-]+)?)", output)
     if not match or match.group(1) != version:
         raise OdxError("OpenCode container version does not match the workspace")
+    if getattr(runtime.workspace, "browser", False):
+        from .. import browser
+
+        browser.ensure()
 
 
 def server_url(runtime):

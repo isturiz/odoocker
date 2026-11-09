@@ -1,0 +1,11 @@
+[project]
+name = "odoocker-browser-runtime"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = [
+    "mcp-proxy @ git+https://github.com/sparfenyuk/mcp-proxy.git@61c738a81c4af34b0873334e22149a0976efa530",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'darwin'"]

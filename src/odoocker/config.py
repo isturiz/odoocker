@@ -156,6 +156,7 @@ class Workspace:
     postgres_version: str = "16"
     pgvector: bool = False
     skill_sources: tuple[SkillSource, ...] = ()
+    browser: bool = False
 
     @classmethod
     def load(cls, root):
@@ -169,7 +170,10 @@ class Workspace:
         opencode = data.get("opencode", {})
         _keys(workspace, {"name"}, "workspace")
         _keys(odoo, {"version", "requirements", "options"}, "odoo")
-        _keys(opencode, {"version"}, "opencode")
+        _keys(opencode, {"version", "browser"}, "opencode")
+        browser = opencode.get("browser", False)
+        if type(browser) is not bool:
+            raise OdxError("opencode.browser must be a boolean")
         postgres = data.get("postgres", {})
         _keys(postgres, {"version", "pgvector"}, "postgres")
         postgres_version = postgres.get("version", "16")
@@ -243,6 +247,7 @@ class Workspace:
             postgres_version,
             pgvector,
             shared_skills,
+            browser,
         )
 
     def validate_core(self):

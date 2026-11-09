@@ -17,6 +17,7 @@ recreate their containers, or modify shell functions and personal profiles.
 - [Configuration](#configuration)
 - [Restore a development backup](#restore-a-development-backup)
 - [Multiple instances and agents](#multiple-instances-and-agents)
+- [Shared host browser](#shared-host-browser-optional)
 - [Tests an agent can run](#tests-an-agent-can-run)
 - [PDF reports](#pdf-reports-included-by-default)
 - [Scope and limitations](#scope-and-limitations)
@@ -395,6 +396,115 @@ The CLI rejects unknown keys to catch configuration errors early.
 After changing the manifest, paths, or engine version, run `configure` and `up`
 to regenerate/recreate. Do not regenerate while another session is using the instance.
 
+### Shared host browser (optional)
+
+On **macOS with Docker Desktop**, container OpenCode can use the host's existing
+Chromium-family browser through [browse](https://github.com/anomalyco/browse).
+The native Mac MCP and any enrolled containers can work simultaneously, sharing
+cookies/accounts but keeping each agent's browser session and tabs separate.
+There is no second browser, relay pairing switch, SSH service, or Docker socket
+mount. Other platforms are not currently supported by this optional feature;
+workspaces that omit it retain their existing behavior.
+
+**Once per machine:** install and pair browse using its own installer, then run:
+
+```sh
+odx browser setup
+odx browser status
+```
+
+This explicitly installs an isolated bridge runtime from the engine's bundled
+dependency lock. It creates a user LaunchAgent for login startup and automatic
+recovery; it does not modify the host's global OpenCode config or extension
+pairing. Subsequent startups do not download dependencies. Repeating setup
+retains the credential and port; a changed runtime is staged before the old
+owned service is replaced, with private backups and rollback on failure.
+Connected browser sessions block maintenance: finish browser work first.
+
+**Per workspace:** add `browser = true` to the existing `[opencode]` table in
+version-controlled `odoocker.toml`, preserving its exact version pin:
+
+```toml
+[opencode]
+version = "2.0.30" # Keep your workspace's actual version, matching the host
+browser = true
+```
+
+Then apply the configuration to the selected, idle instance:
+
+```sh
+odx setup --code
+odx browser check
+odx code opencode
+```
+
+The declaration is reproducible; credentials, machine paths and port state are
+generated locally, never committed or copied from another machine. An existing
+instance needs the normal deliberate configure/recreate workflow; declaring the
+flag does not enroll or restart other instances. Use `--instance NAME` before
+the command to prepare/check another one. Existing workspaces are not discovered
+or migrated automatically. Start Odoo separately with `odx run` when needed.
+
+The bridge listens only on **127.0.0.1**, default port **19989**, and requires a
+private Bearer credential. Docker Desktop reaches it at `host.docker.internal`;
+the engine never opens a LAN listener as a fallback. Choose `odx browser setup
+--port PORT` only during initial installation; subsequent setup refuses to
+change the port and strand enrolled instances. The credential stays in the host's
+private bridge directory, outside the shared workspace, and is mounted read-only
+only in an opted-in OpenCode service. No token value is placed in JSON or subprocess
+arguments. The native browse HTTP/CDP relay remains private and unchanged.
+
+The engine reserves MCP name **`browse`** in its generated system-level config
+while enabled. This overrides a same-name private/project entry without deleting
+it; rename an independent entry if it must coexist. Other MCP servers, provider
+credentials and settings remain in their native volumes. Skills sharing and the
+browser MCP coexist in one generated system file.
+
+**Security and files:** container browser access acts as your signed-in Mac user,
+not as an isolated account. A login/logout can affect other sessions. Use exact
+origin allowlists and coordinate account/data changes; no production operations
+without explicit authorization. All enrolled instances intentionally receive the
+same browser-control authority. Protect tokens and state backups accordingly.
+Return screenshot bytes through MCP (`return await page.screenshot()`); host
+temporary paths do not automatically become container files. To persist an image
+from a container-side client, save its returned bytes inside the shared workspace.
+No broad host file roots or browser security escape hatches are enabled.
+
+Host state lives under `${XDG_DATA_HOME:-~/.local/share}/odoocker/browser/`, logs
+under `${XDG_STATE_HOME:-~/.local/state}/odoocker/browser/`, and the user service
+is `~/Library/LaunchAgents/io.odoocker.browser.plist`. State and tokens remain
+local; the service uses engine-staged code, not a checkout-specific path. Keep
+the Mac logged in and its paired browser profile open. OpenCode connections can
+start an already-installed bridge if needed, but never install dependencies or
+re-enable an explicitly disabled bridge silently.
+
+```sh
+odx browser status   # Read-only; no workspace or browser tab needed
+odx browser check    # Selected instance's transport + extension; opens no tabs
+odx browser stop     # Disable for ALL enrolled instances; native Mac browse remains usable
+odx browser start    # Explicitly re-enable the installed bridge
+```
+
+`check` does not assert that Odoo is serving HTTP or test an authenticated Odoo
+workflow. To disable access for just one workspace, set `browser = false` (or
+omit it) and apply `setup --code` to each affected idle instance; do not stop the
+shared host service while others still need it. Independent pre-existing MCP
+entries are not removed. Do not remove Docker volumes or `.odoocker/` to disable
+browser access.
+
+**Adopting the known local pilot is explicit:** finish browser work, run
+`odx browser setup --adopt-pilot` on the host, declare the workspace flag, then
+run `odx browser adopt-pilot` from that workspace and `odx setup --code` when the
+instance is idle. Host adoption preserves the existing credential/port and keeps
+the old files and a private backup. Instance adoption only marks intent; the
+next managed server startup backs up and removes the exact known pilot entry
+from its private JSON config. Unrelated settings are preserved; differing entries
+and JSONC need an explicit manual merge rather than being overwritten. Once
+adopted, disabling the feature does not reactivate the pilot. No automatic
+cleanup of old scripts, credentials or recovery copies is performed.
+Retained pilot token copies and backups still grant browser-control access;
+protect them until you deliberately retire them after verifying adoption.
+
 ### Share host OpenCode skills (optional)
 
 Opt in per workspace and machine in **`odoocker.local.toml`**, which must remain
@@ -432,10 +542,12 @@ The engine mounts each complete source **read-only**, only in the OpenCode
 service, under `/mnt/odoocker/skills/<index>`. Scripts, references, templates,
 executable permissions and other supporting files remain alongside the skill.
 There is no copying, synchronization script, host Docker socket, or profile mount.
-Only an engine-generated `skills` array is mounted as the container's system
+An engine-generated `skills` array is mounted as the container's system
 configuration at `/etc/opencode/opencode.json`. The independent OpenCode
 configuration/data/state volumes remain unchanged; host credentials, general
 configuration, plugins and state outside the selected directories are not exposed.
+When shared browser access is enabled, its managed MCP entry joins that same
+file; neither feature replaces the other's settings.
 
 **Duplicate IDs:** OpenCode's native explicit sources override automatically
 discovered global/container and project skills. The engine's system-level entries
@@ -1028,6 +1140,19 @@ uv build
 Unit tests do not need Docker or credentials. Live checks must use dedicated
 development workspaces and must not modify existing client environments. Report
 automated checks separately from live validation; see [scope and limitations](#scope-and-limitations).
+
+The optional browser live smoke test uses only its own disposable, explicitly
+named Compose project and a local fixture page, never a client workspace or Odoo
+database. With the managed host bridge prepared, Docker Desktop available, and
+the paired browser open:
+
+```sh
+ODOOCKER_BROWSER_LIVE=1 uv run pytest tests/test_browser_live.py -v -s
+```
+
+It checks shared cookies, independent agent state, and a PNG transferred into
+the test container. It deletes its own browser sessions and Compose resources;
+it does not re-pair the extension or restart the host relay.
 
 ### Versioning
 

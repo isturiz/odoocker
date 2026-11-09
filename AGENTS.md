@@ -16,6 +16,12 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 - `runtime.py`: resource identity and generated Docker/Odoo configuration.
 - `cli.py`: host-facing commands; keep subprocess arguments as lists.
 - `adapters/opencode.py`: OpenCode-specific connection behavior.
+- `browser.py`: explicit, host-scoped shared browse bridge setup and ownership;
+  `browser_bridge/` contains its standalone, locked macOS runtime. Browser access
+  is opt-in per manifest, loopback-only and authenticated. Keep ordinary host
+  browse independent; adopt known pilots only explicitly and with backups.
+- `browser_container.py`: remove only an explicitly adopted pilot's exact MCP
+  entry at managed startup, preserving unrelated configuration and recovery copies.
 - `container.py`: in-container Odoo commands; no Docker access required.
 - `targets.py`: explicit development names, per-database leases and finalized-restore
   catalog. Legacy journals target `dev`; never enroll recovery/test/system databases.
@@ -48,6 +54,8 @@ Docker Compose, and OpenCode V2. Only OpenCode is currently supported.
 - Keep CLI output, package metadata and runtime image versions consistent. Do not change
   Odoo, PostgreSQL or OpenCode pins as part of an engine version bump.
 - Do not create commits, release tags or publications without explicit authorization.
+- Changelog headings use the version number only; do not classify deliveries by
+  whether the changes are currently local or already deployed.
 
 ## Checks
 

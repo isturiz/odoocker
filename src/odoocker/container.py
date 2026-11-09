@@ -394,5 +394,8 @@ def run_tests(modules, *, tags=None, keep=False):
 
 def serve_opencode():
     require_ready()
+    from .browser_container import prepare
+
+    prepare()
     # No background service is started; this process belongs exclusively to this container.
     os.execvp("opencode", ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"])

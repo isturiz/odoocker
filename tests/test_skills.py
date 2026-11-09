@@ -84,6 +84,7 @@ def test_default_keeps_native_storage_and_historical_configuration_label(root, e
     assert "/etc/opencode" not in json.dumps(document)
     historical = asdict(workspace)
     historical.pop("skill_sources")
+    historical.pop("browser")
     expected = hashlib.sha256(
         json.dumps(historical, default=str, sort_keys=True).encode()
     ).hexdigest()

@@ -37,6 +37,22 @@ def parser():
         "--instance", default="main", help="Explicit runtime instance (default: main)"
     )
     commands = result.add_subparsers(dest="command", required=True)
+    browser = commands.add_parser("browser", help="Manage the opt-in shared host browser bridge")
+    browsers = browser.add_subparsers(dest="browser_command", required=True)
+    install_browser = browsers.add_parser("setup", help="Install the locked macOS user bridge")
+    install_browser.add_argument("--port", type=int, help="Initial loopback port (default: 19989)")
+    install_browser.add_argument(
+        "--adopt-pilot", action="store_true", help="Explicitly adopt the known Realista host pilot"
+    )
+    browsers.add_parser("start", help="Enable and start the already-installed shared bridge")
+    browsers.add_parser(
+        "stop", help="Disable the bridge for all workspaces, preserving host browse"
+    )
+    browsers.add_parser("status", help="Read host bridge state without starting it")
+    browsers.add_parser("check", help="Check the selected container transport and paired browser")
+    browsers.add_parser(
+        "adopt-pilot", help="Mark the selected instance's pilot for backed-up adoption"
+    )
     proxy = commands.add_parser("proxy", help="Manage the automatic shared local Caddy proxy")
     proxies = proxy.add_subparsers(dest="proxy_command", required=True)
     start = proxies.add_parser(
@@ -342,6 +358,10 @@ def _status(runtime, as_json=False):
         "project": runtime.project,
         "generated": runtime.compose_file.exists(),
     }
+    if runtime.workspace.browser:
+        from . import browser
+
+        info["browser"] = browser.status()
     if runtime.compose_file.exists():
         services = runtime.compose("ps", "--format", "json", capture=True)
         # Compose releases support either JSON lines or an array.
@@ -394,6 +414,10 @@ def _status(runtime, as_json=False):
 
 
 def host(args):
+    if args.command == "browser":
+        from . import browser
+
+        return browser.command(args)
     if args.command == "proxy":
         from . import proxy
 

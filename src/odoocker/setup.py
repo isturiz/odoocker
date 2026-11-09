@@ -52,6 +52,11 @@ def prepare(runtime, *, code=False):
     with locked(runtime.operation_lock):
         runtime.workspace.validate_sources()
         runtime.validate_instance()
+        if runtime.workspace.browser:
+            from . import browser
+
+            browser.connection()
+            browser.token()
         previous = runtime.compose_file.read_bytes() if runtime.compose_file.exists() else None
         if previous is not None:
             saved = json.loads(previous)

@@ -183,6 +183,8 @@ class Runtime:
         if not self.workspace.skill_sources:
             # Keep the historical label when the optional feature is not configured.
             configuration.pop("skill_sources")
+        if not self.workspace.browser:
+            configuration.pop("browser")
         common = {
             "image": self.image(),
             "build": {
@@ -236,7 +238,7 @@ class Runtime:
                 volume("opencode-state", "/home/odoo/.local/state/opencode"),
             ],
         }
-        if self.workspace.skill_sources:
+        if self.workspace.skill_sources or self.workspace.browser:
             opencode["volumes"].append(
                 bind(
                     self.directory / "opencode-skills.json",
@@ -244,6 +246,13 @@ class Runtime:
                     readonly=True,
                 )
             )
+        if self.workspace.browser:
+            from . import browser
+
+            opencode["volumes"].append(
+                bind(browser.directory() / "token", "/run/odoocker/browser-token", readonly=True)
+            )
+        if self.workspace.skill_sources:
             for index, source in enumerate(self.workspace.skill_sources):
                 target = f"/mnt/odoocker/skills/{index}"
                 if source.directory is not None:
@@ -305,6 +314,11 @@ class Runtime:
         # The updater holds this lock across backup, generation and recreation.
         with nullcontext() if operation_locked else locked(self.operation_lock):
             self.validate_instance(allow_database_switch=allow_database_switch)
+            if self.workspace.browser:
+                from . import browser
+
+                browser.connection()
+                browser.token()
             self.prepare_build(self.directory / "build")
             addons = ["/opt/odoo/odoo/addons", "/opt/odoo/addons"]
             addons.extend(f"/opt/addons/{index}" for index in range(len(self.workspace.addons)))
@@ -350,20 +364,21 @@ class Runtime:
                 write_private(self.directory / name, content)
                 (self.directory / name).chmod(0o644)
             self.directory.chmod(0o700)
-            if self.workspace.skill_sources:
+            if self.workspace.skill_sources or self.workspace.browser:
+                native = {"$schema": "https://opencode.ai/config.json"}
+                if self.workspace.skill_sources:
+                    native["skills"] = [
+                        f"/mnt/odoocker/skills/{index}"
+                        for index in range(len(self.workspace.skill_sources))
+                    ]
+                if self.workspace.browser:
+                    from . import browser
+
+                    native["mcp"] = {"servers": {"browse": browser.server_config()}}
                 skills_config = self.directory / "opencode-skills.json"
                 write_private(
                     skills_config,
-                    json.dumps(
-                        {
-                            "$schema": "https://opencode.ai/config.json",
-                            "skills": [
-                                f"/mnt/odoocker/skills/{index}"
-                                for index in range(len(self.workspace.skill_sources))
-                            ],
-                        },
-                        indent=2,
-                    ),
+                    json.dumps(native, indent=2),
                 )
                 skills_config.chmod(0o644)
             write_private(self.directory / "compose.env", "")
